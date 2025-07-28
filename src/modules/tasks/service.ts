@@ -4,11 +4,87 @@ import { tasks, projects, users, annotations } from '../../db/schema';
 import fs from 'fs';
 import JSZip from 'jszip';
 import path from 'path';
+import sharp from 'sharp';
 
 type SplitConfig = {
     train: number;
     test: number;
     validation: number;
+};
+
+// Helper function to get actual image dimensions from file
+const getImageDimensions = async (imagePath: string): Promise<{ width: number; height: number } | null> => {
+    try {
+        if (!fs.existsSync(imagePath)) {
+            console.warn(`Image file not found: ${imagePath}`);
+            return null;
+        }
+        
+        const metadata = await sharp(imagePath).metadata();
+        if (metadata.width && metadata.height) {
+            return { width: metadata.width, height: metadata.height };
+        }
+        
+        console.warn(`Could not read dimensions from image: ${imagePath}`);
+        return null;
+    } catch (error) {
+        console.error(`Error reading image dimensions from ${imagePath}:`, error);
+        return null;
+    }
+};
+
+// Helper function to resolve image path using UUID from task metadata
+const resolveImagePathFromUUID = (task: any): string | null => {
+    try {
+        if (!task.metadata || !task.metadata.uuid || !task.metadata.originalFileName) {
+            console.log('Missing UUID or originalFileName in task metadata');
+            return null;
+        }
+        
+        // Extract project ID from the task's dataUrl
+        // Example: "http://localhost:8787/api/bucket/taskData/22/uuid.jpg"
+        const projectIdMatch = task.dataUrl.match(/\/(\d+)\//);
+        if (!projectIdMatch) {
+            console.log('Could not extract project ID from dataUrl:', task.dataUrl);
+            return null;
+        }
+        
+        const projectId = parseInt(projectIdMatch[1]);
+        const uuid = task.metadata.uuid;
+        const extension = path.extname(task.metadata.originalFileName);
+        
+        // Construct path: bucket/projects/{projectId}/{uuid}{extension}
+        const filename = `${uuid}${extension}`;
+        const fullPath = path.join(process.cwd(), 'bucket', 'projects', projectId.toString(), filename);
+        
+        console.log(`Resolving image path from UUID: projectId=${projectId}, uuid=${uuid}, originalFileName=${task.metadata.originalFileName} -> ${fullPath}`);
+        return fullPath;
+    } catch (error) {
+        console.error(`Error resolving image path from UUID:`, error);
+        return null;
+    }
+};
+
+// Helper function to resolve image path from dataUrl (fallback)
+const resolveImagePath = (dataUrl: string): string | null => {
+    try {
+        // Extract relative path from the dataUrl
+        // Example: "http://localhost:8787/api/upload/projects/22/image.jpg" 
+        // Should resolve to: "./bucket/projects/22/image.jpg"
+        
+        const url = new URL(dataUrl);
+        const urlPath = url.pathname;
+        
+        // Remove /api/upload prefix to get the bucket path
+        const bucketPath = urlPath.replace('/api/upload/', '');
+        const fullPath = path.join(process.cwd(), 'bucket', bucketPath);
+        
+        console.log(`Resolving image path: ${dataUrl} -> ${fullPath}`);
+        return fullPath;
+    } catch (error) {
+        console.error(`Error resolving image path from ${dataUrl}:`, error);
+        return null;
+    }
 };
 // Get all tasks for a project
 export const getTasksByProject = async (db: LibSQLDatabase, projectId: number, userId: number) => {
@@ -496,15 +572,22 @@ names: [${classes.map((c: string) => `'${c}'`).join(', ')}]
         `.trim();
         zip.file('data.yaml', dataYaml);
 
-        const processTasksForYOLO = (tasks: any[], splitName: string) => {
+        const processTasksForYOLO = async (tasks: any[], splitName: string) => {
             const imagesFolder = zip.folder(`images/${splitName}`);
             const labelsFolder = zip.folder(`labels/${splitName}`);
 
-            tasks.forEach(task => {
-                // Debug: Log annotation data structure
+            for (const task of tasks) {
+                // Debug: Log task and annotation structure
+                console.log('=== Processing task for YOLO export ===');
+                console.log('Task ID:', task.id);
+                console.log('Task metadata:', JSON.stringify(task.metadata, null, 2));
+                console.log('Total annotations for task:', task.annotations.length);
+                
                 if (task.annotations.length > 0) {
-                    console.log('Sample annotation data for task', task.id, ':', JSON.stringify(task.annotations[0].data, null, 2));
-                    console.log('Total annotations for task', task.id, ':', task.annotations.length);
+                    console.log('First annotation structure:', JSON.stringify(task.annotations[0], null, 2));
+                    console.log('First annotation data:', JSON.stringify(task.annotations[0].data, null, 2));
+                } else {
+                    console.log('No annotations found for task', task.id);
                 }
                 
                 // Extract filename from dataUrl
@@ -514,44 +597,156 @@ names: [${classes.map((c: string) => `'${c}'`).join(', ')}]
                 // Process annotations for YOLO format
                 const yoloAnnotations: string[] = [];
                 
-                task.annotations.forEach((annotation: any) => {
+                for (const [annotationIndex, annotation] of task.annotations.entries()) {
+                    console.log(`--- Processing annotation ${annotationIndex + 1}/${task.annotations.length} for task ${task.id} ---`);
+                    console.log('Annotation structure:', JSON.stringify(annotation, null, 2));
+                    
                     if (annotation.data) {
-                        // Get image dimensions with better fallbacks
-                        let imageWidth = annotation.data.imageWidth || annotation.data.width;
-                        let imageHeight = annotation.data.imageHeight || annotation.data.height;
+                        console.log('Annotation data exists, processing...');
+                        console.log('Annotation data type:', typeof annotation.data);
+                        console.log('Annotation data content:', JSON.stringify(annotation.data, null, 2));
+                        
+                        // Get original image dimensions from task metadata first
+                        let imageWidth: number | null = null;
+                        let imageHeight: number | null = null;
+                        
+                        // Priority 1: Use original dimensions from task metadata
+                        if (task.metadata) {
+                            console.log('Task metadata exists, checking for dimensions...');
+                            if (task.metadata.originalImageSize) {
+                                imageWidth = task.metadata.originalImageSize.width;
+                                imageHeight = task.metadata.originalImageSize.height;
+                                console.log('Found originalImageSize in metadata:', { width: imageWidth, height: imageHeight });
+                            } else if (task.metadata.originalWidth && task.metadata.originalHeight) {
+                                imageWidth = task.metadata.originalWidth;
+                                imageHeight = task.metadata.originalHeight;
+                                console.log('Found originalWidth/originalHeight in metadata:', { width: imageWidth, height: imageHeight });
+                            } else if (task.metadata.width && task.metadata.height) {
+                                imageWidth = task.metadata.width;
+                                imageHeight = task.metadata.height;
+                                console.log('Found width/height in metadata:', { width: imageWidth, height: imageHeight });
+                            } else {
+                                console.log('No dimensions found in task metadata');
+                            }
+                        } else {
+                            console.log('No task metadata available');
+                        }
+                        
+                        // Priority 2: Use dimensions from annotation data if not found in metadata
+                        if (!imageWidth || !imageHeight) {
+                            console.log('Looking for dimensions in annotation data...');
+                            imageWidth = annotation.data.imageWidth || annotation.data.width;
+                            imageHeight = annotation.data.imageHeight || annotation.data.height;
+                            console.log('Found dimensions in annotation data:', { width: imageWidth, height: imageHeight });
+                        }
+                        
+                        // Priority 3: Read actual image dimensions from file
+                        if (!imageWidth || !imageHeight) {
+                            console.log('No dimensions found in metadata or annotation data, reading from actual image file...');
+                            
+                            let imagePath: string | null = null;
+                            
+                            // Try to use UUID from task metadata first (more reliable)
+                            if (task.metadata && task.metadata.uuid && task.metadata.originalFileName) {
+                                imagePath = resolveImagePathFromUUID(task);
+                            }
+                            
+                            // Fallback to dataUrl parsing if UUID method fails
+                            if (!imagePath) {
+                                imagePath = resolveImagePath(task.dataUrl);
+                            }
+                            
+                            if (imagePath) {
+                                const actualDimensions = await getImageDimensions(imagePath);
+                                if (actualDimensions) {
+                                    imageWidth = actualDimensions.width;
+                                    imageHeight = actualDimensions.height;
+                                    console.log('Read actual image dimensions:', { width: imageWidth, height: imageHeight });
+                                } else {
+                                    console.error(`Failed to read image dimensions from: ${imagePath}`);
+                                }
+                            } else {
+                                console.error(`Could not resolve image path from dataUrl: ${task.dataUrl}`);
+                            }
+                        }
+                        
+                        // Debug: Log the dimensions being used
+                        console.log(`Task ${task.id}: Using image dimensions - width: ${imageWidth}, height: ${imageHeight} (from ${task.metadata && (imageWidth || imageHeight) ? 'metadata' : 'annotation data'})`);
                         
                         // Handle different annotation data structures
                         let annotationsToProcess = [];
                         if (annotation.data.annotations) {
                             // Structure: { annotations: [...], imageWidth, imageHeight }
                             annotationsToProcess = annotation.data.annotations;
+                            console.log('Found nested annotations array, count:', annotationsToProcess.length);
                         } else if (Array.isArray(annotation.data)) {
                             // Structure: [annotation1, annotation2, ...]
                             annotationsToProcess = annotation.data;
+                            console.log('Annotation data is array, count:', annotationsToProcess.length);
                         } else if (annotation.data.type) {
                             // Structure: single annotation object
                             annotationsToProcess = [annotation.data];
+                            console.log('Single annotation object found');
+                        } else {
+                            console.log('Unknown annotation data structure, trying to process as single object');
+                            annotationsToProcess = [annotation.data];
                         }
                         
-                        annotationsToProcess.forEach((ann: any) => {
+                        console.log('Annotations to process:', JSON.stringify(annotationsToProcess, null, 2));
+                        
+                        for (const [annIndex, ann] of annotationsToProcess.entries()) {
+                            console.log(`Processing individual annotation ${annIndex + 1}/${annotationsToProcess.length}:`, JSON.stringify(ann, null, 2));
                             if (ann.type === 'bounding_box' || ann.type === 'bbox' || ann.type === 'rectangle') {
+                                console.log('Found bounding box annotation:', ann.type);
                                 const classIndex = classes.indexOf(ann.class || ann.label || ann.value);
+                                console.log('Class lookup:', { 
+                                    class: ann.class, 
+                                    label: ann.label, 
+                                    value: ann.value, 
+                                    classIndex,
+                                    availableClasses: classes
+                                });
+                                
                                 if (classIndex >= 0) {
-                                    // Validate coordinates and dimensions
-                                    const x = parseFloat(ann.x) || 0;
-                                    const y = parseFloat(ann.y) || 0;
-                                    const w = parseFloat(ann.width) || 0;
-                                    const h = parseFloat(ann.height) || 0;
+                                    console.log('Valid class found, processing coordinates...');
+                                    // Handle different coordinate formats
+                                    let x, y, w, h;
                                     
-                                    // Try to get image dimensions from annotation if not available
-                                    if (!imageWidth || !imageHeight) {
-                                        imageWidth = ann.imageWidth || ann.canvasWidth || 640;
-                                        imageHeight = ann.imageHeight || ann.canvasHeight || 480;
+                                    if (ann.startPoint) {
+                                        // Format: { startPoint: { x, y }, width, height }
+                                        x = parseFloat(ann.startPoint.x) || 0;
+                                        y = parseFloat(ann.startPoint.y) || 0;
+                                        w = parseFloat(ann.width) || 0;
+                                        h = parseFloat(ann.height) || 0;
+                                    } else {
+                                        // Format: { x, y, width, height }
+                                        x = parseFloat(ann.x) || 0;
+                                        y = parseFloat(ann.y) || 0;
+                                        w = parseFloat(ann.width) || 0;
+                                        h = parseFloat(ann.height) || 0;
                                     }
                                     
-                                    // Ensure valid dimensions
-                                    const imgW = parseFloat(imageWidth) || 640;
-                                    const imgH = parseFloat(imageHeight) || 480;
+                                    console.log('Raw coordinates:', { x, y, w, h });
+                                    
+                                    // Priority 4: Try to get image dimensions from individual annotation if still not available
+                                    if (!imageWidth || !imageHeight) {
+                                        imageWidth = ann.imageWidth || ann.canvasWidth || null;
+                                        imageHeight = ann.imageHeight || ann.canvasHeight || null;
+                                        console.log('Using dimensions from individual annotation:', { width: imageWidth, height: imageHeight });
+                                    }
+                                    
+                                    // Ensure we have valid dimensions before proceeding
+                                    const imgW = imageWidth ? parseFloat(imageWidth.toString()) : NaN;
+                                    const imgH = imageHeight ? parseFloat(imageHeight.toString()) : NaN;
+                                    
+                                    console.log('Final image dimensions:', { imgW, imgH });
+                                    
+                                    // Skip if we don't have valid original dimensions
+                                    if (!imgW || !imgH || isNaN(imgW) || isNaN(imgH)) {
+                                        console.error(`Cannot export task ${task.id}: Missing original image dimensions. This task will be skipped.`);
+                                        console.error(`To fix this, ensure the image file exists and can be read, or add original dimensions to task metadata.`);
+                                        return;
+                                    }
                                     
                                     // Convert to YOLO format (normalized coordinates)
                                     const centerX = (x + w / 2) / imgW;
@@ -559,40 +754,60 @@ names: [${classes.map((c: string) => `'${c}'`).join(', ')}]
                                     const normWidth = w / imgW;
                                     const normHeight = h / imgH;
                                     
+                                    console.log('YOLO conversion:', { centerX, centerY, normWidth, normHeight });
+                                    
                                     // Validate the calculated values
                                     if (!isNaN(centerX) && !isNaN(centerY) && !isNaN(normWidth) && !isNaN(normHeight) &&
                                         centerX >= 0 && centerX <= 1 && centerY >= 0 && centerY <= 1 &&
                                         normWidth > 0 && normWidth <= 1 && normHeight > 0 && normHeight <= 1) {
-                                        yoloAnnotations.push(`${classIndex} ${centerX.toFixed(6)} ${centerY.toFixed(6)} ${normWidth.toFixed(6)} ${normHeight.toFixed(6)}`);
+                                        const yoloLine = `${classIndex} ${centerX.toFixed(6)} ${centerY.toFixed(6)} ${normWidth.toFixed(6)} ${normHeight.toFixed(6)}`;
+                                        yoloAnnotations.push(yoloLine);
+                                        console.log('Added YOLO annotation:', yoloLine);
                                     } else {
                                         console.warn(`Invalid YOLO coordinates for task ${task.id}:`, {
                                             x, y, w, h, imgW, imgH, centerX, centerY, normWidth, normHeight
                                         });
                                     }
+                                } else {
+                                    console.warn(`Unknown class for annotation in task ${task.id}:`, {
+                                        class: ann.class,
+                                        label: ann.label, 
+                                        value: ann.value,
+                                        availableClasses: classes
+                                    });
                                 }
+                            } else {
+                                console.log('Skipping non-bounding box annotation:', ann.type);
                             }
-                        });
+                        }
+                    } else {
+                        console.log(`No annotation data found for annotation ${annotationIndex + 1} in task ${task.id}`);
+                        console.log('Annotation object:', JSON.stringify(annotation, null, 2));
                     }
-                });
+                }
 
                 // Add label file even if empty (YOLO requirement)
                 labelsFolder?.file(`${nameWithoutExt}.txt`, yoloAnnotations.join('\n'));
                 
-                // Debug: Log number of annotations processed
-                console.log(`Processed task ${task.id}: ${yoloAnnotations.length} YOLO annotations generated`);
+                // Debug: Log final results
+                console.log(`=== FINAL RESULTS for task ${task.id} ===`);
+                console.log(`Generated ${yoloAnnotations.length} YOLO annotations`);
+                console.log('YOLO content:', yoloAnnotations.join('\n'));
+                console.log('Label file path:', `${nameWithoutExt}.txt`);
+                console.log('===============================\n');
                 
                 // Note: In a real implementation, you'd copy the actual image files
                 // For now, we just create a placeholder or reference
                 imagesFolder?.file(`${filename}.placeholder`, `Original file: ${task.dataUrl}`);
-            });
+            }
         };
 
         if (data.split) {
-            processTasksForYOLO(data.split.train, 'train');
-            processTasksForYOLO(data.split.test, 'test');
-            processTasksForYOLO(data.split.validation, 'val');
+            await processTasksForYOLO(data.split.train, 'train');
+            await processTasksForYOLO(data.split.test, 'test');
+            await processTasksForYOLO(data.split.validation, 'val');
         } else {
-            processTasksForYOLO(data.tasks, 'train');
+            await processTasksForYOLO(data.tasks, 'train');
         }
 
         const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
@@ -608,7 +823,7 @@ const exportCOCOFormat = async (data: any, project: any) => {
         const zip = new JSZip();
         const classes = project.labelConfig?.classes || [];
         
-        const createCOCODataset = (tasks: any[], splitName: string) => {
+        const createCOCODataset = async (tasks: any[], splitName: string) => {
             const cocoData = {
                 info: {
                     description: `${project.name} - ${splitName} split`,
@@ -634,7 +849,7 @@ const exportCOCOFormat = async (data: any, project: any) => {
             let imageId = 1;
             let annotationId = 1;
 
-            tasks.forEach((task: any) => {
+            for (const task of tasks) {
                 // Debug: Log annotation data structure
                 if (task.annotations.length > 0) {
                     console.log('COCO - Sample annotation data for task', task.id, ':', JSON.stringify(task.annotations[0].data, null, 2));
@@ -654,20 +869,94 @@ const exportCOCOFormat = async (data: any, project: any) => {
                     date_captured: new Date().toISOString()
                 };
 
-                // Try to get image dimensions from annotation data
-                if (task.annotations.length > 0 && task.annotations[0].data) {
-                    imageInfo.width = task.annotations[0].data.imageWidth || task.annotations[0].data.width || 640;
-                    imageInfo.height = task.annotations[0].data.imageHeight || task.annotations[0].data.height || 480;
+                // Try to get image dimensions from task metadata first
+                let imageWidth: number | null = null;
+                let imageHeight: number | null = null;
+                
+                // Priority 1: Use original dimensions from task metadata
+                if (task.metadata) {
+                    if (task.metadata.originalImageSize) {
+                        imageWidth = task.metadata.originalImageSize.width;
+                        imageHeight = task.metadata.originalImageSize.height;
+                    } else if (task.metadata.originalWidth && task.metadata.originalHeight) {
+                        imageWidth = task.metadata.originalWidth;
+                        imageHeight = task.metadata.originalHeight;
+                    } else if (task.metadata.width && task.metadata.height) {
+                        imageWidth = task.metadata.width;
+                        imageHeight = task.metadata.height;
+                    }
+                }
+                
+                // Priority 2: Use dimensions from annotation data if not found in metadata
+                if ((!imageWidth || !imageHeight) && task.annotations.length > 0 && task.annotations[0].data) {
+                    imageWidth = task.annotations[0].data.imageWidth || task.annotations[0].data.width || imageWidth;
+                    imageHeight = task.annotations[0].data.imageHeight || task.annotations[0].data.height || imageHeight;
+                }
+                
+                // Priority 3: Read actual image dimensions from file
+                if (!imageWidth || !imageHeight) {
+                    console.log(`COCO: Reading actual image dimensions for task ${task.id}...`);
+                    
+                    let imagePath: string | null = null;
+                    
+                    // Try to use UUID from task metadata first (more reliable)
+                    if (task.metadata && task.metadata.uuid && task.metadata.originalFileName) {
+                        imagePath = resolveImagePathFromUUID(task);
+                    }
+                    
+                    // Fallback to dataUrl parsing if UUID method fails
+                    if (!imagePath) {
+                        imagePath = resolveImagePath(task.dataUrl);
+                    }
+                    
+                    if (imagePath) {
+                        const actualDimensions = await getImageDimensions(imagePath);
+                        if (actualDimensions) {
+                            imageWidth = actualDimensions.width;
+                            imageHeight = actualDimensions.height;
+                            console.log(`COCO: Read actual image dimensions for task ${task.id}:`, { width: imageWidth, height: imageHeight });
+                        }
+                    }
+                }
+                
+                // Set final dimensions - fail if we still don't have them
+                if (!imageWidth || !imageHeight) {
+                    console.error(`COCO: Cannot export task ${task.id}: Missing original image dimensions`);
+                    imageInfo.width = 0; // This will make it clear there's an issue
+                    imageInfo.height = 0;
+                } else {
+                    imageInfo.width = imageWidth;
+                    imageInfo.height = imageHeight;
                 }
 
                 cocoData.images.push(imageInfo);
 
                 // Process annotations
-                task.annotations.forEach((annotation: any) => {
+                for (const annotation of task.annotations) {
                     if (annotation.data) {
-                        // Get image dimensions with better fallbacks
-                        let imgWidth = annotation.data.imageWidth || annotation.data.width || imageInfo.width;
-                        let imgHeight = annotation.data.imageHeight || annotation.data.height || imageInfo.height;
+                        // Get original image dimensions from task metadata first
+                        let imgWidth: number | null = null;
+                        let imgHeight: number | null = null;
+                        
+                        // Priority 1: Use original dimensions from task metadata
+                        if (task.metadata) {
+                            if (task.metadata.originalImageSize) {
+                                imgWidth = task.metadata.originalImageSize.width;
+                                imgHeight = task.metadata.originalImageSize.height;
+                            } else if (task.metadata.originalWidth && task.metadata.originalHeight) {
+                                imgWidth = task.metadata.originalWidth;
+                                imgHeight = task.metadata.originalHeight;
+                            } else if (task.metadata.width && task.metadata.height) {
+                                imgWidth = task.metadata.width;
+                                imgHeight = task.metadata.height;
+                            }
+                        }
+                        
+                        // Priority 2: Use dimensions from annotation data if not found in metadata
+                        if (!imgWidth || !imgHeight) {
+                            imgWidth = annotation.data.imageWidth || annotation.data.width || imageInfo.width;
+                            imgHeight = annotation.data.imageHeight || annotation.data.height || imageInfo.height;
+                        }
                         
                         // Handle different annotation data structures
                         let annotationsToProcess = [];
@@ -682,20 +971,31 @@ const exportCOCOFormat = async (data: any, project: any) => {
                             annotationsToProcess = [annotation.data];
                         }
                         
-                        annotationsToProcess.forEach((ann: any) => {
+                        for (const ann of annotationsToProcess) {
                             if (ann.type === 'bounding_box' || ann.type === 'bbox' || ann.type === 'rectangle') {
                                 const categoryId = classes.indexOf(ann.class || ann.label || ann.value) + 1;
                                 if (categoryId > 0) {
-                                    // Validate coordinates
-                                    const x = parseFloat(ann.x) || 0;
-                                    const y = parseFloat(ann.y) || 0;
-                                    const w = parseFloat(ann.width) || 0;
-                                    const h = parseFloat(ann.height) || 0;
+                                    // Handle different coordinate formats
+                                    let x, y, w, h;
                                     
-                                    // Try to get image dimensions from annotation if not available
+                                    if (ann.startPoint) {
+                                        // Format: { startPoint: { x, y }, width, height }
+                                        x = parseFloat(ann.startPoint.x) || 0;
+                                        y = parseFloat(ann.startPoint.y) || 0;
+                                        w = parseFloat(ann.width) || 0;
+                                        h = parseFloat(ann.height) || 0;
+                                    } else {
+                                        // Format: { x, y, width, height }
+                                        x = parseFloat(ann.x) || 0;
+                                        y = parseFloat(ann.y) || 0;
+                                        w = parseFloat(ann.width) || 0;
+                                        h = parseFloat(ann.height) || 0;
+                                    }
+                                    
+                                    // Priority 3: Try to get image dimensions from individual annotation if still not available
                                     if (!imgWidth || !imgHeight) {
-                                        imgWidth = ann.imageWidth || ann.canvasWidth || 640;
-                                        imgHeight = ann.imageHeight || ann.canvasHeight || 480;
+                                        imgWidth = ann.imageWidth || ann.canvasWidth || imageInfo.width;
+                                        imgHeight = ann.imageHeight || ann.canvasHeight || imageInfo.height;
                                     }
                                     
                                     // Validate the coordinates and dimensions
@@ -717,28 +1017,28 @@ const exportCOCOFormat = async (data: any, project: any) => {
                                     }
                                 }
                             }
-                        });
+                        }
                     }
-                });
+                }
 
                 imageId++;
-            });
+            }
 
             return cocoData;
         };
 
         if (data.split) {
             // Create separate COCO files for each split
-            const trainCoco = createCOCODataset(data.split.train, 'train');
-            const testCoco = createCOCODataset(data.split.test, 'test');
-            const valCoco = createCOCODataset(data.split.validation, 'val');
+            const trainCoco = await createCOCODataset(data.split.train, 'train');
+            const testCoco = await createCOCODataset(data.split.test, 'test');
+            const valCoco = await createCOCODataset(data.split.validation, 'val');
             
             zip.file('annotations/instances_train.json', JSON.stringify(trainCoco, null, 2));
             zip.file('annotations/instances_test.json', JSON.stringify(testCoco, null, 2));
             zip.file('annotations/instances_val.json', JSON.stringify(valCoco, null, 2));
         } else {
             // Single COCO file
-            const coco = createCOCODataset(data.tasks, 'dataset');
+            const coco = await createCOCODataset(data.tasks, 'dataset');
             zip.file('annotations/instances.json', JSON.stringify(coco, null, 2));
         }
 

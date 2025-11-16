@@ -1,5 +1,5 @@
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
-import { eq, and, desc, isNull, not, gt } from 'drizzle-orm';
+import { eq, and, desc, isNull, not, gt, or } from 'drizzle-orm';
 import { tasks, projects, users, annotations, organizationRelations, organizationRoles, projectRelations, projectRoles } from '../../db/schema';
 import fs from 'fs';
 import JSZip from 'jszip';
@@ -34,6 +34,162 @@ const isUserOrgAdmin = async (db: LibSQLDatabase, userId: number, organizationId
     } catch (error) {
         console.error('Error checking admin status:', error);
         return false;
+    }
+};
+
+// Reusable permission checker helper function
+const checkTaskManagementPermissions = async (
+    db: LibSQLDatabase, 
+    userId: number, 
+    projectId?: number, 
+    organizationId?: number
+) => {
+    try {
+        let isOrgAdmin = false;
+        let hasProjectEditPermission = false;
+
+        // First check organization admin permission (if organizationId provided)
+        if (organizationId) {
+            const orgPermissions = await db
+                .select({ permissionFlags: organizationRoles.permissionFlags })
+                .from(organizationRelations)
+                .where(
+                    and(
+                        eq(organizationRelations.userId, userId),
+                        eq(organizationRelations.organizationId, organizationId)
+                    )
+                )
+                .innerJoin(
+                    organizationRoles,
+                    eq(organizationRoles.id, organizationRelations.roleId)
+                )
+                .get();
+
+            isOrgAdmin = orgPermissions?.permissionFlags.admin === true;
+        }
+
+        // Then check project edit permission (if projectId provided and not already org admin)
+        if (!isOrgAdmin && projectId) {
+            const projectPermissions = await db
+                .select({ permissionFlags: projectRoles.permissionFlags })
+                .from(projectRelations)
+                .where(
+                    and(
+                        eq(projectRelations.userId, userId),
+                        eq(projectRelations.projectId, projectId)
+                    )
+                )
+                .innerJoin(
+                    projectRoles,
+                    eq(projectRoles.id, projectRelations.roleId)
+                )
+                .get();
+
+            hasProjectEditPermission = projectPermissions?.permissionFlags.editProject === true;
+        }
+
+        return {
+            isOrgAdmin,
+            hasProjectEditPermission,
+            canManageTasks: isOrgAdmin || hasProjectEditPermission
+        };
+    } catch (error) {
+        console.error('Error checking task management permissions:', error);
+        return {
+            isOrgAdmin: false,
+            hasProjectEditPermission: false,
+            canManageTasks: false
+        };
+    }
+};
+
+// Helper function to validate task update permissions
+export const validateTaskUpdatePermissions = async (
+    db: LibSQLDatabase,
+    userId: number,
+    taskIds: number | number[],
+    updates: any
+) => {
+    try {
+        // Normalize taskIds to array
+        const taskIdArray = Array.isArray(taskIds) ? taskIds : [taskIds];
+
+        // Get all tasks being updated
+        const tasksToUpdate = await db
+            .select({
+                id: tasks.id,
+                projectId: tasks.projectId,
+                assignedTo: tasks.assignedTo,
+                status: tasks.status
+            })
+            .from(tasks)
+            .where(or(...taskIdArray.map(id => eq(tasks.id, id))));
+
+        if (tasksToUpdate.length !== taskIdArray.length) {
+            return {
+                success: false,
+                error: 'One or more tasks not found'
+            };
+        }
+
+        // Verify all tasks belong to the same project
+        const uniqueProjectIds = [...new Set(tasksToUpdate.map(task => task.projectId))];
+        if (uniqueProjectIds.length > 1) {
+            return {
+                success: false,
+                error: 'All tasks must belong to the same project for batch updates'
+            };
+        }
+
+        const projectId = uniqueProjectIds[0];
+
+        // Get project's organizationId
+        const project = await db
+            .select({ organizationId: projects.organizationId })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .get();
+
+        if (!project) {
+            return {
+                success: false,
+                error: 'Project not found'
+            };
+        }
+
+        // Check permissions using the helper
+        const permissions = await checkTaskManagementPermissions(
+            db,
+            userId,
+            projectId,
+            project.organizationId
+        );
+
+        // If user has management permissions, allow unconditionally
+        if (permissions.canManageTasks) {
+            return { success: true };
+        }
+
+        // If no management permissions, check if user can complete their own work
+        const allTasksAssignedToUser = tasksToUpdate.every(task => task.assignedTo === userId);
+        const isCompletionUpdate = updates.status === 'completed' && Object.keys(updates).length === 1;
+
+        if (allTasksAssignedToUser && isCompletionUpdate) {
+            return { success: true };
+        }
+
+        // Otherwise, deny access
+        return {
+            success: false,
+            error: 'You need editProject permission or organization admin access to manage tasks in this project'
+        };
+
+    } catch (error) {
+        console.error('Error validating task update permissions:', error);
+        return {
+            success: false,
+            error: 'Failed to validate permissions'
+        };
     }
 };
 
@@ -149,44 +305,15 @@ export const getTasksByProject = async (db: LibSQLDatabase, projectId: number, u
 export const getTasksByUser = async (db: LibSQLDatabase, userId: number, projectId?: number, organizationId?: number) => {
     try {
         let whereCondition;
-        let isOrgAdmin = false;
-        let canEditProject = false;
 
-        // First tier: Check if user is admin in the organization (if organizationId provided)
-        if (organizationId) {
-            isOrgAdmin = await isUserOrgAdmin(db, userId, organizationId);
-        }
-
-        // Second tier: Check if user has editProject permission for the specific project (if projectId provided)
-        if (!isOrgAdmin && projectId) {
-            try {
-                const projectPermissions = await db
-                    .select({ permissionFlags: projectRoles.permissionFlags })
-                    .from(projectRelations)
-                    .where(
-                        and(
-                            eq(projectRelations.userId, userId),
-                            eq(projectRelations.projectId, projectId)
-                        )
-                    )
-                    .innerJoin(
-                        projectRoles,
-                        eq(projectRoles.id, projectRelations.roleId)
-                    )
-                    .get();
-
-                canEditProject = projectPermissions?.permissionFlags.editProject === true;
-            } catch (error) {
-                console.error('Error checking project permissions:', error);
-                canEditProject = false;
-            }
-        }
+        // Use the reusable permission checker
+        const permissionCheck = await checkTaskManagementPermissions(db, userId, projectId, organizationId);
 
         // Determine query condition based on permission tiers
-        if (isOrgAdmin) {
+        if (permissionCheck.isOrgAdmin) {
             // Org admin sees all tasks (optionally filtered by project)
             whereCondition = projectId ? eq(tasks.projectId, projectId) : undefined;
-        } else if (canEditProject && projectId) {
+        } else if (permissionCheck.hasProjectEditPermission && projectId) {
             // Project editor sees all tasks within that specific project
             whereCondition = eq(tasks.projectId, projectId);
         } else {
@@ -215,11 +342,11 @@ export const getTasksByUser = async (db: LibSQLDatabase, userId: number, project
 
         // Build comprehensive permissions object
         const permissions = {
-            isOrgAdmin,
-            canEditProject,
-            canAssignTasks: isOrgAdmin || canEditProject,
-            canViewAllTasks: isOrgAdmin || canEditProject,
-            canExportDataset: isOrgAdmin || canEditProject
+            isOrgAdmin: permissionCheck.isOrgAdmin,
+            canEditProject: permissionCheck.hasProjectEditPermission,
+            canAssignTasks: permissionCheck.canManageTasks,
+            canViewAllTasks: permissionCheck.canManageTasks,
+            canExportDataset: permissionCheck.canManageTasks
         };
 
         return { 

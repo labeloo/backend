@@ -15,7 +15,8 @@ import {
     completeTask,
     deleteTask,
     getTaskStats,
-    exportDataset
+    exportDataset,
+    validateTaskUpdatePermissions
 } from './service';
 
 const app = new Hono<{ Variables: Variables }>();
@@ -59,7 +60,7 @@ app.get('/my-tasks', async (c) => {
 
         return c.json({ 
             data: result.data,
-            isAdmin: result.isAdmin // Include admin status in response
+            permissions: result.permissions // Include permissions object in response
         });
     } catch (error) {
         console.error('Error in get user tasks route:', error);
@@ -111,6 +112,7 @@ app.post('/create', async (c) => {
 app.put('/update', async (c) => {
     try {
         const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
         const { taskId, ...updates } = await c.req.json();
 
         if (!taskId) throw new Error('Task ID is required in request body');
@@ -121,6 +123,16 @@ app.put('/update', async (c) => {
 
         if (!isValidTaskId) {
             throw new Error('Task ID must be a number or array of numbers');
+        }
+
+        // Validate permissions before allowing update
+        const permissionCheck = await validateTaskUpdatePermissions(db, userId, taskId, updates);
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
         }
 
         const result = await updateTask(db, taskId, updates);

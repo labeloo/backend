@@ -1,6 +1,6 @@
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import { eq, and, desc, isNull, not, gt } from 'drizzle-orm';
-import { tasks, projects, users, annotations, organizationRelations, organizationRoles } from '../../db/schema';
+import { tasks, projects, users, annotations, organizationRelations, organizationRoles, projectRelations, projectRoles } from '../../db/schema';
 import fs from 'fs';
 import JSZip from 'jszip';
 import path from 'path';
@@ -145,20 +145,50 @@ export const getTasksByProject = async (db: LibSQLDatabase, projectId: number, u
     }
 };
 
-// Get tasks assigned to a specific user (with admin override)
+// Get tasks assigned to a specific user (with three-tier permission system)
 export const getTasksByUser = async (db: LibSQLDatabase, userId: number, projectId?: number, organizationId?: number) => {
     try {
         let whereCondition;
-        let isAdmin = false;
+        let isOrgAdmin = false;
+        let canEditProject = false;
 
-        // Check if user is admin in the organization (if organizationId provided)
+        // First tier: Check if user is admin in the organization (if organizationId provided)
         if (organizationId) {
-            isAdmin = await isUserOrgAdmin(db, userId, organizationId);
+            isOrgAdmin = await isUserOrgAdmin(db, userId, organizationId);
         }
 
-        if (isAdmin) {
-            // Admin sees all tasks in the project/organization
+        // Second tier: Check if user has editProject permission for the specific project (if projectId provided)
+        if (!isOrgAdmin && projectId) {
+            try {
+                const projectPermissions = await db
+                    .select({ permissionFlags: projectRoles.permissionFlags })
+                    .from(projectRelations)
+                    .where(
+                        and(
+                            eq(projectRelations.userId, userId),
+                            eq(projectRelations.projectId, projectId)
+                        )
+                    )
+                    .innerJoin(
+                        projectRoles,
+                        eq(projectRoles.id, projectRelations.roleId)
+                    )
+                    .get();
+
+                canEditProject = projectPermissions?.permissionFlags.editProject === true;
+            } catch (error) {
+                console.error('Error checking project permissions:', error);
+                canEditProject = false;
+            }
+        }
+
+        // Determine query condition based on permission tiers
+        if (isOrgAdmin) {
+            // Org admin sees all tasks (optionally filtered by project)
             whereCondition = projectId ? eq(tasks.projectId, projectId) : undefined;
+        } else if (canEditProject && projectId) {
+            // Project editor sees all tasks within that specific project
+            whereCondition = eq(tasks.projectId, projectId);
         } else {
             // Regular users see only their assigned tasks
             whereCondition = projectId
@@ -183,10 +213,19 @@ export const getTasksByUser = async (db: LibSQLDatabase, userId: number, project
             .where(whereCondition)
             .orderBy(desc(tasks.priority), desc(tasks.createdAt));
 
+        // Build comprehensive permissions object
+        const permissions = {
+            isOrgAdmin,
+            canEditProject,
+            canAssignTasks: isOrgAdmin || canEditProject,
+            canViewAllTasks: isOrgAdmin || canEditProject,
+            canExportDataset: isOrgAdmin || canEditProject
+        };
+
         return { 
             data: result, 
             success: true,
-            isAdmin // Return admin status for frontend use
+            permissions
         };
     } catch (error: any) {
         console.error('Error getting tasks by user:', error);

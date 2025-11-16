@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Variables } from '../../types';
 import JSZip from 'jszip';
+import { eq } from 'drizzle-orm';
+import { projects } from '../../db/schema';
 import {
     getTasksByProject,
     getTasksByUser,
@@ -38,18 +40,27 @@ app.get('/project/:projectId', async (c) => {
     }
 });
 
-// Get tasks assigned to current user (optionally filtered by project)
+// Get tasks assigned to current user (optionally filtered by project, with admin override)
 app.get('/my-tasks', async (c) => {
     try {
         const db = c.var.db;
         const userId = c.var.jwtPayload.userId;
         const projectId = c.req.query('projectId');
+        const organizationId = c.req.query('organizationId');
 
-        const result = await getTasksByUser(db, userId, projectId ? Number(projectId) : undefined);
+        const result = await getTasksByUser(
+            db, 
+            userId, 
+            projectId ? Number(projectId) : undefined,
+            organizationId ? Number(organizationId) : undefined
+        );
 
         if (!result.success) throw new Error(result.error);
 
-        return c.json({ data: result.data });
+        return c.json({ 
+            data: result.data,
+            isAdmin: result.isAdmin // Include admin status in response
+        });
     } catch (error) {
         console.error('Error in get user tasks route:', error);
         return c.json({ error: 'Failed to retrieve user tasks', details: error.message }, 500);
@@ -222,6 +233,29 @@ app.get('/stats/:projectId', async (c) => {
     } catch (error) {
         console.error('Error in get task stats route:', error);
         return c.json({ error: 'Failed to retrieve task statistics', details: error.message }, 500);
+    }
+});
+
+// Get organization ID for a project (helper for frontend)
+app.get('/project/:projectId/organization', async (c) => {
+    try {
+        const db = c.var.db;
+        const projectId = Number(c.req.param('projectId'));
+
+        if (!projectId) throw new Error('Project ID is required');
+
+        const project = await db
+            .select({ organizationId: projects.organizationId })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .get();
+
+        if (!project) throw new Error('Project not found');
+
+        return c.json({ data: { organizationId: project.organizationId } });
+    } catch (error) {
+        console.error('Error in get project organization route:', error);
+        return c.json({ error: 'Failed to retrieve project organization', details: error.message }, 500);
     }
 });
 

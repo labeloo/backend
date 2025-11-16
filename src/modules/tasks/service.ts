@@ -1,6 +1,6 @@
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import { eq, and, desc, isNull, not, gt } from 'drizzle-orm';
-import { tasks, projects, users, annotations } from '../../db/schema';
+import { tasks, projects, users, annotations, organizationRelations, organizationRoles } from '../../db/schema';
 import fs from 'fs';
 import JSZip from 'jszip';
 import path from 'path';
@@ -10,6 +10,31 @@ type SplitConfig = {
     train: number;
     test: number;
     validation: number;
+};
+
+// Helper function to check if user is admin in organization
+const isUserOrgAdmin = async (db: LibSQLDatabase, userId: number, organizationId: number): Promise<boolean> => {
+    try {
+        const permissions = await db
+            .select({ permissionFlags: organizationRoles.permissionFlags })
+            .from(organizationRelations)
+            .where(
+                and(
+                    eq(organizationRelations.userId, userId),
+                    eq(organizationRelations.organizationId, organizationId)
+                )
+            )
+            .innerJoin(
+                organizationRoles,
+                eq(organizationRoles.id, organizationRelations.roleId)
+            )
+            .get();
+
+        return permissions?.permissionFlags.admin === true;
+    } catch (error) {
+        console.error('Error checking admin status:', error);
+        return false;
+    }
 };
 
 // Helper function to get actual image dimensions from file
@@ -120,12 +145,26 @@ export const getTasksByProject = async (db: LibSQLDatabase, projectId: number, u
     }
 };
 
-// Get tasks assigned to a specific user
-export const getTasksByUser = async (db: LibSQLDatabase, userId: number, projectId?: number) => {
+// Get tasks assigned to a specific user (with admin override)
+export const getTasksByUser = async (db: LibSQLDatabase, userId: number, projectId?: number, organizationId?: number) => {
     try {
-        const whereCondition = projectId
-            ? and(eq(tasks.assignedTo, userId), eq(tasks.projectId, projectId))
-            : eq(tasks.assignedTo, userId);
+        let whereCondition;
+        let isAdmin = false;
+
+        // Check if user is admin in the organization (if organizationId provided)
+        if (organizationId) {
+            isAdmin = await isUserOrgAdmin(db, userId, organizationId);
+        }
+
+        if (isAdmin) {
+            // Admin sees all tasks in the project/organization
+            whereCondition = projectId ? eq(tasks.projectId, projectId) : undefined;
+        } else {
+            // Regular users see only their assigned tasks
+            whereCondition = projectId
+                ? and(eq(tasks.assignedTo, userId), eq(tasks.projectId, projectId))
+                : eq(tasks.assignedTo, userId);
+        }
 
         const result = await db
             .select({
@@ -144,7 +183,11 @@ export const getTasksByUser = async (db: LibSQLDatabase, userId: number, project
             .where(whereCondition)
             .orderBy(desc(tasks.priority), desc(tasks.createdAt));
 
-        return { data: result, success: true };
+        return { 
+            data: result, 
+            success: true,
+            isAdmin // Return admin status for frontend use
+        };
     } catch (error: any) {
         console.error('Error getting tasks by user:', error);
         return { error: error.message || 'Failed to retrieve user tasks', success: false };

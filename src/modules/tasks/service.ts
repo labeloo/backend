@@ -193,6 +193,116 @@ export const validateTaskUpdatePermissions = async (
     }
 };
 
+// Helper function to validate dataset export permissions
+export const validateDatasetExportPermissions = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+) => {
+    try {
+        // Get project's organizationId
+        const project = await db
+            .select({ organizationId: projects.organizationId })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .get();
+
+        if (!project) {
+            return {
+                success: false,
+                error: 'Project not found'
+            };
+        }
+
+        // Check permissions using the helper
+        const permissions = await checkTaskManagementPermissions(
+            db,
+            userId,
+            projectId,
+            project.organizationId
+        );
+
+        // Allow export if user has management permissions (org admin OR project edit permission)
+        if (permissions.canManageTasks) {
+            return { success: true };
+        }
+
+        // Otherwise, deny access
+        return {
+            success: false,
+            error: 'Dataset export requires editProject permission or organization admin access'
+        };
+
+    } catch (error) {
+        console.error('Error validating dataset export permissions:', error);
+        return {
+            success: false,
+            error: 'Failed to validate export permissions'
+        };
+    }
+};
+
+// Helper function to validate single task operation permissions
+export const validateSingleTaskOperationPermissions = async (
+    db: LibSQLDatabase,
+    userId: number,
+    taskId: number,
+    operation: 'assign' | 'unassign' | 'complete'
+) => {
+    try {
+        // Get the task with its project information
+        const taskWithProject = await db
+            .select({
+                taskId: tasks.id,
+                taskProjectId: tasks.projectId,
+                taskAssignedTo: tasks.assignedTo,
+                projectOrganizationId: projects.organizationId
+            })
+            .from(tasks)
+            .innerJoin(projects, eq(tasks.projectId, projects.id))
+            .where(eq(tasks.id, taskId))
+            .get();
+
+        if (!taskWithProject) {
+            return {
+                success: false,
+                error: 'Task not found'
+            };
+        }
+
+        // Check permissions using the helper
+        const permissions = await checkTaskManagementPermissions(
+            db,
+            userId,
+            taskWithProject.taskProjectId,
+            taskWithProject.projectOrganizationId
+        );
+
+        // Allow operation if user has management permissions (org admin OR project edit permission)
+        if (permissions.canManageTasks) {
+            return { success: true };
+        }
+
+        // Special exception for complete operation: allow users to complete their own assigned tasks
+        if (operation === 'complete' && taskWithProject.taskAssignedTo === userId) {
+            return { success: true };
+        }
+
+        // Otherwise, deny access
+        return {
+            success: false,
+            error: 'You need editProject permission or organization admin access to manage tasks in this project'
+        };
+
+    } catch (error) {
+        console.error('Error validating single task operation permissions:', error);
+        return {
+            success: false,
+            error: 'Failed to validate permissions'
+        };
+    }
+};
+
 // Helper function to get actual image dimensions from file
 const getImageDimensions = async (imagePath: string): Promise<{ width: number; height: number } | null> => {
     try {

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Variables } from '../../types';
 import JSZip from 'jszip';
+import { eq } from 'drizzle-orm';
+import { projects } from '../../db/schema';
 import {
     getTasksByProject,
     getTasksByUser,
@@ -13,7 +15,10 @@ import {
     completeTask,
     deleteTask,
     getTaskStats,
-    exportDataset
+    exportDataset,
+    validateTaskUpdatePermissions,
+    validateDatasetExportPermissions,
+    validateSingleTaskOperationPermissions
 } from './service';
 
 const app = new Hono<{ Variables: Variables }>();
@@ -38,18 +43,27 @@ app.get('/project/:projectId', async (c) => {
     }
 });
 
-// Get tasks assigned to current user (optionally filtered by project)
+// Get tasks assigned to current user (optionally filtered by project, with admin override)
 app.get('/my-tasks', async (c) => {
     try {
         const db = c.var.db;
         const userId = c.var.jwtPayload.userId;
         const projectId = c.req.query('projectId');
+        const organizationId = c.req.query('organizationId');
 
-        const result = await getTasksByUser(db, userId, projectId ? Number(projectId) : undefined);
+        const result = await getTasksByUser(
+            db, 
+            userId, 
+            projectId ? Number(projectId) : undefined,
+            organizationId ? Number(organizationId) : undefined
+        );
 
         if (!result.success) throw new Error(result.error);
 
-        return c.json({ data: result.data });
+        return c.json({ 
+            data: result.data,
+            permissions: result.permissions // Include permissions object in response
+        });
     } catch (error) {
         console.error('Error in get user tasks route:', error);
         return c.json({ error: 'Failed to retrieve user tasks', details: error.message }, 500);
@@ -100,6 +114,7 @@ app.post('/create', async (c) => {
 app.put('/update', async (c) => {
     try {
         const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
         const { taskId, ...updates } = await c.req.json();
 
         if (!taskId) throw new Error('Task ID is required in request body');
@@ -110,6 +125,16 @@ app.put('/update', async (c) => {
 
         if (!isValidTaskId) {
             throw new Error('Task ID must be a number or array of numbers');
+        }
+
+        // Validate permissions before allowing update
+        const permissionCheck = await validateTaskUpdatePermissions(db, userId, taskId, updates);
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
         }
 
         const result = await updateTask(db, taskId, updates);
@@ -132,11 +157,22 @@ app.put('/update', async (c) => {
 app.post('/assign/:taskId', async (c) => {
     try {
         const db = c.var.db;
+        const currentUserId = c.var.jwtPayload.userId;
         const taskId = Number(c.req.param('taskId'));
         const { userId } = await c.req.json();
 
         if (!taskId) throw new Error('Task ID is required');
         if (!userId) throw new Error('User ID is required');
+
+        // Validate permissions before allowing assignment
+        const permissionCheck = await validateSingleTaskOperationPermissions(db, currentUserId, taskId, 'assign');
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
+        }
 
         const result = await assignTask(db, taskId, userId);
 
@@ -153,9 +189,20 @@ app.post('/assign/:taskId', async (c) => {
 app.post('/:taskId/unassign', async (c) => {
     try {
         const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
         const taskId = Number(c.req.param('taskId'));
 
         if (!taskId) throw new Error('Task ID is required');
+
+        // Validate permissions before allowing unassignment
+        const permissionCheck = await validateSingleTaskOperationPermissions(db, userId, taskId, 'unassign');
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
+        }
 
         const result = await unassignTask(db, taskId);
 
@@ -172,9 +219,21 @@ app.post('/:taskId/unassign', async (c) => {
 app.post('/complete/:taskId', async (c) => {
     try {
         const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
         const taskId = Number(c.req.param('taskId'));
 
         if (!taskId) throw new Error('Task ID is required');
+
+        // Validate permissions before allowing completion
+        // Note: Complete has special exception for users completing their own assigned tasks
+        const permissionCheck = await validateSingleTaskOperationPermissions(db, userId, taskId, 'complete');
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
+        }
 
         const result = await completeTask(db, taskId);
 
@@ -191,9 +250,21 @@ app.post('/complete/:taskId', async (c) => {
 app.delete('/:taskId', async (c) => {
     try {
         const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
         const taskId = Number(c.req.param('taskId'));
 
         if (!taskId) throw new Error('Task ID is required');
+
+        // Validate permissions before allowing deletion
+        // Note: Delete requires management permissions (no self-service exception like complete)
+        const permissionCheck = await validateSingleTaskOperationPermissions(db, userId, taskId, 'assign');
+        
+        if (!permissionCheck.success) {
+            const statusCode = permissionCheck.error?.includes('permission') ? 403 : 400;
+            return c.json({ 
+                error: permissionCheck.error || 'Permission validation failed'
+            }, statusCode);
+        }
 
         const result = await deleteTask(db, taskId);
 
@@ -225,14 +296,47 @@ app.get('/stats/:projectId', async (c) => {
     }
 });
 
-//export dataset
-app.post('/export/:projectId', async (c) => {
+// Get organization ID for a project (helper for frontend)
+app.get('/project/:projectId/organization', async (c) => {
     try {
         const db = c.var.db;
         const projectId = Number(c.req.param('projectId'));
 
+        if (!projectId) throw new Error('Project ID is required');
+
+        const project = await db
+            .select({ organizationId: projects.organizationId })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .get();
+
+        if (!project) throw new Error('Project not found');
+
+        return c.json({ data: { organizationId: project.organizationId } });
+    } catch (error) {
+        console.error('Error in get project organization route:', error);
+        return c.json({ error: 'Failed to retrieve project organization', details: error.message }, 500);
+    }
+});
+
+//export dataset
+app.post('/export/:projectId', async (c) => {
+    try {
+        const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
+        const projectId = Number(c.req.param('projectId'));
+
         if (!projectId) {
             return c.json({ error: 'Project ID is required' }, 400);
+        }
+
+        // Validate export permissions
+        const permissionCheck = await validateDatasetExportPermissions(db, userId, projectId);
+        
+        if (!permissionCheck.success) {
+            return c.json({ 
+                error: permissionCheck.error 
+            }, permissionCheck.error?.includes('requires') ? 403 : 400);
         }
 
         const body = await c.req.json();
@@ -247,12 +351,17 @@ app.post('/export/:projectId', async (c) => {
 
         const filename = `dataset_${projectId}_${exportFormat}_${new Date().toISOString().split('T')[0]}.${getFileExtension(exportFormat)}`;
 
-        return new Response(result.data, {
-            headers: {
-                'Content-Type': getContentType(exportFormat),
-                'Content-Disposition': `attachment; filename=${filename}`
-            }
-        });
+        // Type guard to ensure result has data property
+        if ('data' in result && result.data) {
+            return new Response(result.data as unknown as BodyInit, {
+                headers: {
+                    'Content-Type': getContentType(exportFormat),
+                    'Content-Disposition': `attachment; filename=${filename}`
+                }
+            });
+        } else {
+            return c.json({ error: 'Export data not available' }, 500);
+        }
     } catch (err: any) {
         console.error('Export failed:', err);
         return c.json({ error: 'Internal server error', details: err.message }, 500);

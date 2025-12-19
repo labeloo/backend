@@ -40,6 +40,10 @@ The app will start at http://localhost:8787
 
 ```
 
+## 📚 Documentation
+
+- [Backend Relations & Types API](./docs/backendRelations.md)
+
 ## 🧬 Philosophy
 Labeloo Backend is built for modern developers who want full control, safety, and performance — without the bloat.
 We chose every tool deliberately to support a clean, fast, and flexible backend.

@@ -14,6 +14,7 @@ import projectRoles from './projectRoles/route';
 import projectRelations from './projectRelations/route';
 import tasks from './tasks/route';
 import bucket from './upload/route';
+import backendRelations from './backendRelations/route';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -51,5 +52,7 @@ app.route('/projectRoles', projectRoles);
 app.route('/projectRelations', projectRelations);
 
 app.route('/tasks', tasks);
+
+app.route('/backendRelations', backendRelations);
 
 export default app;

@@ -1,0 +1,17 @@
+[
+    {
+        "id": "openai",
+        "name": "OpenAI",
+        "isActive": true
+    },
+    {
+        "id": "sam2",
+        "name": "Sam2",
+        "isActive": true
+    },
+    {
+        "id": "sam3",
+        "name": "Sam3",
+        "isActive": true
+    }
+]

@@ -220,3 +220,22 @@ export const annotations = sqliteTable('annotations', {
         .notNull()
         .default(sql`(unixepoch())`),
 });
+
+export const backendRelations = sqliteTable('backend_relations', {
+    id: int('id').primaryKey({
+        autoIncrement: true,
+    }),
+    organizationId: int('organization_id')
+        .notNull()
+        .references(() => organizations.id),
+    backendId: text('backend_id').notNull(),
+    baseUrl: text('base_url').notNull(),
+    apiKey: text('api_key').notNull(),
+    isActive: int('is_active', { mode: 'boolean' }),
+    createdAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+    updatedAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+});

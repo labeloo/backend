@@ -102,7 +102,7 @@ app.post('/uploadPicture', async (c) => {
         if (!result) throw new Error('Failed to save profile picture');
 
         return c.json({
-            url: `http://localhost:8787/api/bucket/public/${uuid}`, 
+            url: `/api/bucket/public/${uuid}`, 
         });
     } catch (error) {
         console.error('Error in upload profile picture route:', error);
@@ -187,7 +187,7 @@ app.post('/uploadData', async (c) => {
                                             entry.pipe(writeStream);
                                             
                                             writeStream.on('close', async () => {
-                                                const imageUrl = `${imageName}`;
+                                                const imageUrl = `/api/bucket/taskData/${projectId}/${imageName}`;
                                                 
                                                 // Create task for the extracted image
                                                 const taskResult = await createTask(
@@ -256,7 +256,7 @@ app.post('/uploadData', async (c) => {
                     const result = await saveFile(fileBuffer, imagePath);
                     
                     if (result) {
-                        const imageUrl = `http://localhost:8787/api/bucket/taskData/${projectId}/${imageName}`;
+                        const imageUrl = `/api/bucket/taskData/${projectId}/${imageName}`;
                         
                         // Create task for the direct image upload
                         const taskResult = await createTask(

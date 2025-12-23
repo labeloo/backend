@@ -21,7 +21,7 @@ app.get('/public/:uuid', (c) => {
         const fileBuffer = fs.readFileSync(filePath);
         if (!fileBuffer) throw new Error('Failed to read profile picture file');
 
-        return c.body(fileBuffer, 200, {
+        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
             'Content-Type': 'image/jpeg', // Adjust based on your file type
         });
     } catch (error) {
@@ -65,7 +65,7 @@ app.get('/taskData/:projectId/:fileName', (c) => {
             contentType = 'image/bmp';
         }
 
-        return c.body(fileBuffer, 200, {
+        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
             'Content-Type': contentType,
         });
     } catch (error) {

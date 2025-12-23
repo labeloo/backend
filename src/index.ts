@@ -9,7 +9,12 @@ import api from './modules/index';
 
 const app = new Hono<{ Variables: Variables }>();
 
-app.use('*', cors());
+app.use('*', cors({
+    origin: 'http://192.168.1.8:3000',
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.use('*', async (c, next) => {
     const db = drizzle('file:database.db');

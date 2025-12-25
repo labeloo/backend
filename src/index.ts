@@ -8,7 +8,7 @@ import type { Variables } from './types';
 import api from './modules/index';
 
 const app = new Hono<{ Variables: Variables }>();
-
+/* 
 app.use('/api/auth/login', cors({
     origin: ['http://192.168.1.8:3000', 'http://localhost:3000','http://0.0.0.0:3000'],
     credentials: true,
@@ -21,6 +21,15 @@ app.use('*', cors({
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['*'],
+}));
+ */
+
+
+app.use('*', cors({
+    origin: ['http://192.168.1.8:3000', 'http://localhost:3000', 'http://0.0.0.0:3000'],
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'orgId', 'projectId', 'fps'],
 }));
 
 app.use('*', async (c, next) => {

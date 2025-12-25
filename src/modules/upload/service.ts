@@ -1,14 +1,15 @@
 import fs from 'fs';
+import path from 'path';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import { tasks } from '../../db/schema';
 
-export const saveFile = async (file: ArrayBuffer, path: string): Promise<boolean> => {
+export const saveFile = async (file: ArrayBuffer, filePath: string): Promise<boolean> => {
     // Create directory if it doesn't exist
-    const dir = path.split('/').slice(0, -1).join('/');
+    const dir = path.dirname(filePath);
     await fs.promises.mkdir(dir, { recursive: true });
 
     return new Promise((resolve, reject) => {
-        fs.writeFile(path, Buffer.from(file), (err) => {
+        fs.writeFile(filePath, Buffer.from(file), (err) => {
             if (err) {
                 console.error('Error saving file:', err);
                 return reject(err);

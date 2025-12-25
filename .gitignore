@@ -1,3 +1,5 @@
 node_modules
 *-lock.yaml
 bucket/*
+database.db
+drizzle/*

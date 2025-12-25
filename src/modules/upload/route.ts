@@ -5,6 +5,15 @@ import fs from 'fs';
 import { jwt } from 'hono/jwt';
 import path from 'path';
 import unzipper from 'unzipper';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegPath from 'ffmpeg-static';
+
+if (ffmpegPath) {
+    console.log('Setting ffmpeg path to:', ffmpegPath);
+    ffmpeg.setFfmpegPath(ffmpegPath);
+} else {
+    console.error('ffmpeg-static did not return a path!');
+}
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -307,6 +316,156 @@ app.post('/uploadData', async (c) => {
         return c.json(
             {
                 error: 'Failed to upload data',
+                details: error.message,
+            },
+            500
+        );
+    }
+});
+
+
+// Upload video data and extract frames
+app.post('/uploadDataVideo', async (c) => {
+    try {
+        const db = c.var.db;
+        const projectId = c.req.header('projectId');
+        const fpsHeader = c.req.header('fps');
+        const fps = fpsHeader ? parseFloat(fpsHeader) : 1;
+
+        if (!projectId) throw new Error('Project ID is required');
+
+        const formData = await c.req.formData();
+        const files = formData.getAll('files');
+        
+        if (!files || files.length === 0) {
+            throw new Error('At least one video file is required');
+        }
+
+        // Create project directories
+        const projectDir = `./bucket/projects/${projectId}`;
+        const rawDir = `${projectDir}/raw`;
+        
+        if (!fs.existsSync(projectDir)) {
+            fs.mkdirSync(projectDir, { recursive: true });
+        }
+        if (!fs.existsSync(rawDir)) {
+            fs.mkdirSync(rawDir, { recursive: true });
+        }
+
+        const uploadedFiles = [];
+        const createdTasks = [];
+        const videoExtensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm'];
+
+        for (const file of files) {
+            if (file instanceof File) {
+                const fileBuffer = await file.arrayBuffer();
+                const originalFileName = file.name || 'unknown';
+                const fileExt = path.extname(originalFileName).toLowerCase();
+                
+                if (videoExtensions.includes(fileExt)) {
+                    // Save video file to raw directory with UUID
+                    const videoUuid = crypto.randomUUID();
+                    const videoFileName = `${videoUuid}${fileExt}`;
+                    const videoPath = path.join(rawDir, videoFileName);
+                    
+                    // Save the video file
+                    const result = await saveFile(fileBuffer, videoPath);
+                    
+                    if (result) {
+                        try {
+                            // Extract frames using ffmpeg
+                            await new Promise((resolve, reject) => {
+                                const outputPattern = path.join(projectDir, `${videoUuid}_frame_%d.jpg`);
+                                
+                                ffmpeg(videoPath)
+                                    .fps(fps)
+                                    .output(outputPattern)
+                                    .on('end', async () => {
+                                        try {
+                                            // Find generated files
+                                            const files = fs.readdirSync(projectDir);
+                                            const frameFiles = files.filter(f => f.startsWith(`${videoUuid}_frame_`) && f.endsWith('.jpg'));
+                                            
+                                            for (const frameFile of frameFiles) {
+                                                const imageUrl = `/api/bucket/taskData/${projectId}/${frameFile}`;
+                                                const frameUuid = crypto.randomUUID();
+                                                
+                                                // Create task for the extracted frame
+                                                const taskResult = await createTask(
+                                                    db,
+                                                    parseInt(projectId),
+                                                    imageUrl,
+                                                    'image',
+                                                    {
+                                                        originalFileName: `${originalFileName} (Frame)`,
+                                                        extractedFrom: originalFileName,
+                                                        videoUuid: videoUuid,
+                                                        mimeType: 'image/jpeg',
+                                                        uuid: frameUuid
+                                                    }
+                                                );
+                                                
+                                                if (taskResult.success && taskResult.data) {
+                                                    createdTasks.push(taskResult.data);
+                                                }
+                                            }
+                                            resolve(true);
+                                        } catch (err) {
+                                            reject(err);
+                                        }
+                                    })
+                                    .on('error', (err) => {
+                                        console.error('FFmpeg error:', err);
+                                        reject(err);
+                                    })
+                                    .run();
+                            });
+                            
+                            uploadedFiles.push({
+                                type: 'video',
+                                uuid: videoUuid,
+                                fileName: videoFileName,
+                                originalFileName: originalFileName,
+                                path: videoPath,
+                                message: `Video processed. Frames extracted at ${fps} FPS.`
+                            });
+                            
+                        } catch (processError: any) {
+                            console.error('Error processing video:', processError);
+                            uploadedFiles.push({
+                                type: 'video',
+                                uuid: videoUuid,
+                                fileName: videoFileName,
+                                originalFileName: originalFileName,
+                                path: videoPath,
+                                message: 'Video saved but frame extraction failed.',
+                                error: processError.message
+                            });
+                        }
+                    }
+                } else {
+                    // Skip non-video files
+                    uploadedFiles.push({
+                        type: 'skipped',
+                        fileName: originalFileName,
+                        message: 'File skipped - only video files are allowed in this endpoint'
+                    });
+                }
+            }
+        }
+
+        return c.json({
+            message: 'Video upload and processing completed',
+            projectId: projectId,
+            uploadedFiles: uploadedFiles,
+            createdTasks: createdTasks.length,
+            projectDir: projectDir
+        });
+    } catch (error) {
+        console.error('Error in upload video route:', error);
+        return c.json(
+            {
+                error: 'Failed to upload and process video',
                 details: error.message,
             },
             500

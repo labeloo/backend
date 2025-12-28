@@ -14,5 +14,6 @@ export type ProjectPermissionFlags = {
     deleteProject: boolean;
     editMembers: boolean;
     editRoles: boolean;
-    uploadFiles: boolean;    
+    uploadFiles: boolean;
+    reviewAnnotations: boolean;
 }

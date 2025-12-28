@@ -16,4 +16,5 @@ export type ProjectPermissionFlags = {
     editRoles: boolean;
     uploadFiles: boolean;
     reviewAnnotations: boolean;
+    viewReviews: boolean;
 }

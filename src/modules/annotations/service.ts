@@ -1,6 +1,6 @@
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import { annotations, users, tasks, reviews } from '../../db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { determineWorkflowMode } from '../reviews/workflow';
 
 // Types for completeAnnotation return
@@ -68,7 +68,7 @@ export const createAnnotation = async (
                 annotationData: body.annotationData,
                 isGroundTruth: body.isGroundTruth,
                 reviewStatus: body.reviewStatus,
-                reviewerId: body.reviewerId,  
+                assignedReviewerId: body.assignedReviewerId,  
             })
             .returning()
             .get();
@@ -94,7 +94,7 @@ export const getAnnotationsByTaskId = async (
                 annotationData: annotations.annotationData,
                 isGroundTruth: annotations.isGroundTruth,
                 reviewStatus: annotations.reviewStatus,
-                reviewerId: annotations.reviewerId,
+                assignedReviewerId: annotations.assignedReviewerId,
                 createdAt: annotations.createdAt,
                 updatedAt: annotations.updatedAt,
                 // Join with users table to get user email for annotator
@@ -178,6 +178,16 @@ export const completeAnnotation = async (
             return { error: 'You do not have permission to complete this annotation', success: false };
         }
 
+        // GUARD: Prevent duplicate completion
+        // Only annotations with 'pending' status can be completed
+        // This prevents duplicate reviews from being created if called twice
+        if (annotation.reviewStatus !== 'pending') {
+            return { 
+                error: `Annotation already completed with status: ${annotation.reviewStatus}`, 
+                success: false 
+            };
+        }
+
         // 2. Fetch the related task
         const task = await db
             .select()
@@ -189,8 +199,25 @@ export const completeAnnotation = async (
             return { error: 'Related task not found', success: false };
         }
 
+        // Also guard on task status - should be 'annotating' or 'changes_needed' to complete
+        if (task.status !== 'annotating' && task.status !== 'changes_needed') {
+            return { 
+                error: `Task is not in a completable state. Current status: ${task.status}`, 
+                success: false 
+            };
+        }
+
         const now = Math.floor(Date.now() / 1000);
         const reviewId = generateReviewId();
+
+        // Compute the next review round (handles resubmissions after changes_requested)
+        const lastRound = await db
+            .select({ max: sql<number>`max(review_round)` })
+            .from(reviews)
+            .where(eq(reviews.annotationId, annotationId))
+            .get();
+        
+        const nextRound = (lastRound?.max ?? 0) + 1;
 
         // 3. Determine workflow mode
         const workflow = await determineWorkflowMode(db, annotation.projectId, userId);
@@ -210,26 +237,26 @@ export const completeAnnotation = async (
                     })
                     .where(eq(tasks.id, annotation.taskId)),
 
-                // Update annotation to approved
+                // Update annotation to approved (no assigned reviewer needed for auto-approve)
                 db.update(annotations)
                     .set({
                         reviewStatus: 'approved',
-                        reviewerId: userId, // Self-approved
+                        assignedReviewerId: null, // Clear assignment since it's auto-approved
                         updatedAt: now,
                     })
                     .where(eq(annotations.id, annotationId)),
 
-                // Create auto-approved review record
+                // Create auto-approved review record (reviewerId in reviews table = who performed review)
                 db.insert(reviews).values({
                     id: reviewId,
                     annotationId: annotationId,
                     taskId: annotation.taskId,
                     projectId: annotation.projectId,
-                    reviewerId: userId,
+                    reviewerId: userId, // The user who triggered auto-approval
                     status: 'approved',
                     message: null,
                     isAutoApproved: true,
-                    reviewRound: 1,
+                    reviewRound: nextRound,
                     createdAt: now,
                     updatedAt: now,
                 }),
@@ -265,11 +292,11 @@ export const completeAnnotation = async (
                     })
                     .where(eq(tasks.id, annotation.taskId)),
 
-                // Update annotation to pending review
+                // Update annotation to pending review with assigned reviewer
                 db.update(annotations)
                     .set({
                         reviewStatus: 'pending',
-                        reviewerId: workflow.assignedReviewer ?? null,
+                        assignedReviewerId: workflow.assignedReviewer ?? null,
                         updatedAt: now,
                     })
                     .where(eq(annotations.id, annotationId)),
@@ -282,11 +309,11 @@ export const completeAnnotation = async (
                     annotationId: annotationId,
                     taskId: annotation.taskId,
                     projectId: annotation.projectId,
-                    reviewerId: workflow.assignedReviewer,
+                    reviewerId: workflow.assignedReviewer, // Who is assigned to review
                     status: 'pending',
                     message: null,
                     isAutoApproved: false,
-                    reviewRound: 1,
+                    reviewRound: nextRound,
                     createdAt: now,
                     updatedAt: now,
                 });

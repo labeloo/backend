@@ -98,7 +98,7 @@ export const createReview = async (
         // Note: libsql/drizzle doesn't have full transaction support in all contexts,
         // so we use batch which executes atomically
         const result = await db.batch([
-            // 1. Insert the review
+            // 1. Insert the review (reviewerId = who performed the review)
             db.insert(reviews).values({
                 id: reviewId,
                 annotationId: input.annotationId,
@@ -113,11 +113,12 @@ export const createReview = async (
                 updatedAt: now,
             }),
 
-            // 2. Update the annotation's review status and reviewer
+            // 2. Update the annotation's review status
+            // Note: We don't update assignedReviewerId here - it's set during workflow assignment
+            // The actual reviewer is tracked in the reviews table
             db.update(annotations)
                 .set({
                     reviewStatus: newAnnotationReviewStatus,
-                    reviewerId: input.reviewerId,
                     updatedAt: now,
                 })
                 .where(eq(annotations.id, input.annotationId)),
@@ -453,10 +454,22 @@ export const getReviewById = async (
 };
 
 /**
- * Delete a review by ID
- * Note: This also needs to potentially update annotation/task status
+ * Delete a review by ID - INTERNAL USE ONLY
+ * 
+ * WARNING: This function is intentionally NOT exposed via API routes.
+ * Deleting a review without properly updating the annotation and task state
+ * would leave the system in an inconsistent state.
+ * 
+ * If review deletion is needed in the future, it must:
+ * 1. Recalculate the annotation's reviewStatus based on remaining reviews
+ * 2. Update the task status accordingly
+ * 3. Handle the case where it's the only review (revert to in_review state?)
+ * 4. Be restricted to admin users only
+ * 
+ * For now, reviews are considered immutable after creation.
+ * Use updateReview to change the status of a pending review instead.
  */
-export const deleteReview = async (
+export const _deleteReviewInternal = async (
     db: LibSQLDatabase,
     reviewId: string
 ): Promise<{ data?: typeof reviews.$inferSelect; error?: string; success: boolean }> => {
@@ -470,6 +483,11 @@ export const deleteReview = async (
         if (!existingReview) {
             return { error: 'Review not found', success: false };
         }
+
+        // TODO: Add proper state management here if this function is ever used
+        // - Recalculate annotation.reviewStatus
+        // - Update task.status
+        // - Handle review round logic
 
         const result = await db
             .delete(reviews)

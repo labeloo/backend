@@ -209,6 +209,13 @@ export const tasks = sqliteTable('tasks', {
         .default(sql`(unixepoch())`),
 });
 
+// Annotation review status enum - distinct from review decision status
+// 'pending' = awaiting review OR awaiting re-submission after changes_requested
+// 'approved' = annotation has been approved (final state)
+// 'rejected' = annotation has been rejected (final state, requires new annotation)
+export const annotationReviewStatusEnum = ['pending', 'approved', 'rejected'] as const;
+export type AnnotationReviewStatus = typeof annotationReviewStatusEnum[number];
+
 export const annotations = sqliteTable('annotations', {
     id: int('id').primaryKey({
         autoIncrement: true,
@@ -230,10 +237,15 @@ export const annotations = sqliteTable('annotations', {
     })
         .notNull()
         .default(false),
-    reviewStatus: text('review_status', ['pending', 'approved', 'rejected'])
+    // Review status of the annotation itself (not the review decision)
+    // Maps from review.status: approved→approved, rejected→rejected, changes_requested→pending
+    reviewStatus: text('review_status', { enum: annotationReviewStatusEnum })
         .notNull()
         .default('pending'),
-    reviewerId: int('reviewer_id').references(() => users.id),
+    // The ASSIGNED reviewer for this annotation (who should review it)
+    // This is set by workflow auto-assignment or manual assignment
+    // NOT the same as "who last reviewed" - that info lives in the reviews table
+    assignedReviewerId: int('assigned_reviewer_id').references(() => users.id),
     createdAt: int({ mode: 'number' })
         .notNull()
         .default(sql`(unixepoch())`),

@@ -1,7 +1,34 @@
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
-import { projects, projectRelations, organizations } from '../../db/schema';
+import { projects, projectRelations, projectRoles, organizations } from '../../db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import fs from 'fs';
+import {
+    getProjectReviewSettings as getSettingsFromWorkflow,
+    getEligibleReviewers as getReviewersFromWorkflow,
+    determineWorkflowMode,
+    type WorkflowMode,
+    type EligibleReviewer,
+    type ProjectReviewSettings,
+} from '../reviews/workflow';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface ReviewSettingsResponse extends ProjectReviewSettings {
+    currentWorkflowMode: WorkflowMode;
+}
+
+export interface EligibleReviewersResponse {
+    reviewers: EligibleReviewer[];
+    count: number;
+}
+
+export interface UpdateReviewSettingsInput {
+    reviewMode?: 'auto' | 'always-required' | 'always-skip';
+    allowSelfReview?: boolean;
+    autoAssignReviewer?: boolean;
+}
 
 //get all projects with userId for specific organization
 export const getProjects = async (
@@ -212,6 +239,193 @@ export const deleteProject = async (
         console.error('Error deleting project:', error);
         return {
             error: error.message || 'Failed to delete project',
+            success: false,
+        };
+    }
+};
+
+// ============================================================================
+// Review Settings Functions
+// ============================================================================
+
+/**
+ * Checks if user is a member of the project (has any role)
+ */
+export const isProjectMember = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+): Promise<boolean> => {
+    const relation = await db
+        .select({ userId: projectRelations.userId })
+        .from(projectRelations)
+        .where(
+            and(
+                eq(projectRelations.userId, userId),
+                eq(projectRelations.projectId, projectId)
+            )
+        )
+        .get();
+
+    return relation !== undefined;
+};
+
+/**
+ * Checks if user has editProject permission
+ */
+export const hasEditProjectPermission = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+): Promise<boolean> => {
+    const permissions = await db
+        .select({ permissionFlags: projectRoles.permissionFlags })
+        .from(projectRoles)
+        .innerJoin(
+            projectRelations,
+            eq(projectRoles.id, projectRelations.roleId)
+        )
+        .where(
+            and(
+                eq(projectRelations.userId, userId),
+                eq(projectRelations.projectId, projectId)
+            )
+        )
+        .get();
+
+    if (!permissions) return false;
+    return permissions.permissionFlags?.editProject === true;
+};
+
+/**
+ * Updates project review settings
+ */
+export const updateProjectReviewSettings = async (
+    db: LibSQLDatabase,
+    projectId: number,
+    settings: UpdateReviewSettingsInput
+) => {
+    try {
+        const { reviewMode, allowSelfReview, autoAssignReviewer } = settings;
+
+        // Build update object with only provided fields
+        const updateData: Record<string, any> = {
+            updatedAt: Math.floor(Date.now() / 1000),
+        };
+
+        if (reviewMode !== undefined) {
+            updateData.reviewMode = reviewMode;
+        }
+        if (allowSelfReview !== undefined) {
+            updateData.allowSelfReview = allowSelfReview;
+        }
+        if (autoAssignReviewer !== undefined) {
+            updateData.autoAssignReviewer = autoAssignReviewer;
+        }
+
+        // Update project
+        const updatedProject = await db
+            .update(projects)
+            .set(updateData)
+            .where(eq(projects.id, projectId))
+            .returning({
+                reviewMode: projects.reviewMode,
+                allowSelfReview: projects.allowSelfReview,
+                autoAssignReviewer: projects.autoAssignReviewer,
+            })
+            .get();
+
+        if (!updatedProject) {
+            return { error: 'Project not found', success: false };
+        }
+
+        return {
+            data: {
+                reviewMode: updatedProject.reviewMode,
+                allowSelfReview: updatedProject.allowSelfReview,
+                autoAssignReviewer: updatedProject.autoAssignReviewer,
+            },
+            success: true,
+        };
+    } catch (error) {
+        console.error('Error updating project review settings:', error);
+        return {
+            error: error instanceof Error ? error.message : 'Failed to update review settings',
+            success: false,
+        };
+    }
+};
+
+/**
+ * Gets project review settings and current workflow mode for a user
+ */
+export const getProjectReviewSettings = async (
+    db: LibSQLDatabase,
+    projectId: number,
+    userId: number
+) => {
+    try {
+        // Fetch review settings
+        const settings = await getSettingsFromWorkflow(db, projectId);
+
+        // Determine current workflow mode for this user
+        let currentWorkflowMode: WorkflowMode;
+        try {
+            const workflow = await determineWorkflowMode(db, projectId, userId);
+            currentWorkflowMode = workflow.mode;
+        } catch {
+            // If workflow determination fails (e.g., always-required with no reviewers),
+            // still return settings but indicate the issue
+            currentWorkflowMode = 'review-required';
+        }
+
+        const response: ReviewSettingsResponse = {
+            ...settings,
+            currentWorkflowMode,
+        };
+
+        return { data: response, success: true };
+    } catch (error) {
+        console.error('Error fetching project review settings:', error);
+        return {
+            error: error instanceof Error ? error.message : 'Failed to fetch review settings',
+            success: false,
+        };
+    }
+};
+
+/**
+ * Gets eligible reviewers for a project with their workload
+ */
+export const getEligibleReviewers = async (
+    db: LibSQLDatabase,
+    projectId: number
+) => {
+    try {
+        // Verify project exists
+        const project = await db
+            .select({ id: projects.id })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .get();
+
+        if (!project) {
+            return { error: 'Project not found', success: false };
+        }
+
+        // Get eligible reviewers (don't exclude anyone - show all eligible)
+        const reviewers = await getReviewersFromWorkflow(db, projectId);
+
+        const response: EligibleReviewersResponse = {
+            reviewers,
+            count: reviewers.length,
+        };
+
+        return { data: response, success: true };
+    } catch (error) {
+        console.error('Error fetching eligible reviewers:', error);
+        return {
+            error: error instanceof Error ? error.message : 'Failed to fetch eligible reviewers',
             success: false,
         };
     }

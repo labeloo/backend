@@ -116,6 +116,7 @@ export const reviewQuerySchema = z.object({
         })
         .optional(),
     page: z
+        .coerce
         .number({
             invalid_type_error: 'page must be a number',
         })
@@ -123,6 +124,7 @@ export const reviewQuerySchema = z.object({
         .min(1, 'page must be at least 1')
         .default(1),
     limit: z
+        .coerce
         .number({
             invalid_type_error: 'limit must be a number',
         })

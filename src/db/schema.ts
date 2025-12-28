@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { sqliteTable, text, int } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, int, index } from 'drizzle-orm/sqlite-core';
+
+// Review-related enums
+export const reviewModeEnum = ['auto', 'always-required', 'always-skip'] as const;
+export type ReviewMode = typeof reviewModeEnum[number];
+
+export const reviewStatusEnum = ['pending', 'approved', 'rejected', 'changes_requested'] as const;
+export type ReviewStatus = typeof reviewStatusEnum[number];
+
+export const taskStatusEnum = ['unassigned', 'annotating', 'completed', 'in_review', 'changes_needed'] as const;
+export type TaskStatus = typeof taskStatusEnum[number];
 import type {
     OrganizationPermissionFlags,
     ProjectPermissionFlags,
@@ -134,6 +144,17 @@ export const projects = sqliteTable('projects', {
     }).$type<{
         classes: string[];
     }>(),
+    reviewMode: text('review_mode', {
+        enum: reviewModeEnum,
+    })
+        .notNull()
+        .default('auto'),
+    allowSelfReview: int('allow_self_review', { mode: 'boolean' })
+        .notNull()
+        .default(false),
+    autoAssignReviewer: int('auto_assign_reviewer', { mode: 'boolean' })
+        .notNull()
+        .default(true),
     createdAt: int({ mode: 'number' })
         .notNull()
         .default(sql`(unixepoch())`),
@@ -173,7 +194,7 @@ export const tasks = sqliteTable('tasks', {
     dataUrl: text('data_url').notNull(),
     dataType: text('data_type').notNull(), //this will be a json string
     status: text('status', {
-        enum: ['unassigned', 'annotating', 'completed']
+        enum: taskStatusEnum,
     })
         .notNull()
         .default('unassigned'),
@@ -239,3 +260,43 @@ export const backendRelations = sqliteTable('backend_relations', {
         .notNull()
         .default(sql`(unixepoch())`),
 });
+
+export const reviews = sqliteTable('reviews', {
+    id: text('id').primaryKey(),
+    annotationId: int('annotation_id')
+        .notNull()
+        .references(() => annotations.id, { onDelete: 'cascade' }),
+    taskId: int('task_id')
+        .notNull()
+        .references(() => tasks.id),
+    projectId: int('project_id')
+        .notNull()
+        .references(() => projects.id),
+    reviewerId: int('reviewer_id')
+        .notNull()
+        .references(() => users.id),
+    status: text('status', {
+        enum: reviewStatusEnum,
+    })
+        .notNull()
+        .default('pending'),
+    message: text('message'),
+    isAutoApproved: int('is_auto_approved', { mode: 'boolean' })
+        .notNull()
+        .default(false),
+    reviewRound: int('review_round')
+        .notNull()
+        .default(1),
+    createdAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+    updatedAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+}, (table) => [
+    index('idx_reviews_annotation').on(table.annotationId),
+    index('idx_reviews_task').on(table.taskId),
+    index('idx_reviews_project').on(table.projectId),
+    index('idx_reviews_reviewer').on(table.reviewerId),
+    index('idx_reviews_status').on(table.status),
+]);

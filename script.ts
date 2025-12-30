@@ -87,6 +87,8 @@ config();
             editMembers: true,
             editRoles: true,
             uploadFiles: true,
+            reviewAnnotations: true,
+            viewReviews: true,
         },
     });
 
@@ -99,6 +101,8 @@ config();
             editMembers: false,
             editRoles: false,
             uploadFiles: false,
+            reviewAnnotations: false,
+            viewReviews: true,
         },
     });
 

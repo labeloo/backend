@@ -38,6 +38,8 @@ export const getOrganizationRoles = async (
                 id: organizationRoles.id,
                 name: organizationRoles.name,
                 description: organizationRoles.description,
+                icon: organizationRoles.icon,
+                color: organizationRoles.color,
                 permissionFlags: organizationRoles.permissionFlags,
                 createdAt: organizationRoles.createdAt,
                 updatedAt: organizationRoles.updatedAt,

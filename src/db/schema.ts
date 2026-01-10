@@ -59,6 +59,8 @@ export const organizationRoles = sqliteTable('organization_roles', {
     }),
     name: text('name').notNull(),
     description: text('description'),
+    icon: text('icon'),
+    color: text('color'),
     organizationId: int('organization_id').references(() => organizations.id),
     permissionFlags: text('permission_flags', {
         mode: 'json',

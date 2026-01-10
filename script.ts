@@ -45,6 +45,8 @@ config();
     await db.insert(organizationRoles).values({
         name: 'admin',
         description: 'admin',
+        icon: 'i-heroicons-shield-check',
+        color: 'red',
         permissionFlags: {
             admin: true,
             editOrganization: true,
@@ -60,6 +62,8 @@ config();
     await db.insert(organizationRoles).values({
         name: 'user',
         description: 'Default user role',
+        icon: 'i-heroicons-user-group',
+        color: 'blue',
         permissionFlags: {
             admin: false,
             editOrganization: false,

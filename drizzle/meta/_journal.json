@@ -36,6 +36,13 @@
       "when": 1767081600000,
       "tag": "0004_data_migration_review_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1768044497891,
+      "tag": "0005_mature_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

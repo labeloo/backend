@@ -16,6 +16,7 @@ import tasks from './tasks/route';
 import bucket from './upload/route';
 import backendRelations from './backendRelations/route';
 import reviews from './reviews/route';
+import shortcuts from './shortcuts/route';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -55,6 +56,8 @@ app.route('/projectRelations', projectRelations);
 app.route('/tasks', tasks);
 
 app.route('/backendRelations', backendRelations);
+
+app.route('/shortcuts', shortcuts);
 
 app.route('/', reviews);
 

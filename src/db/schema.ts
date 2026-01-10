@@ -314,3 +314,31 @@ export const reviews = sqliteTable('reviews', {
     index('idx_reviews_reviewer').on(table.reviewerId),
     index('idx_reviews_status').on(table.status),
 ]);
+
+// Shortcut scopes
+export const shortcutScopeEnum = ['canvas', 'global', 'review'] as const;
+export type ShortcutScope = typeof shortcutScopeEnum[number];
+
+// User shortcuts - stores only user overrides, not defaults
+export const userShortcuts = sqliteTable('user_shortcuts', {
+    id: int('id').primaryKey({
+        autoIncrement: true,
+    }),
+    userId: int('user_id')
+        .notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    action: text('action').notNull(), // e.g. SAVE_ANNOTATION, TOOL_RECT, TOOL_POLYGON
+    key: text('key').notNull(), // e.g. 's', 'ctrl+s', 'r', 'p'
+    scope: text('scope', { enum: shortcutScopeEnum })
+        .notNull()
+        .default('canvas'),
+    createdAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+    updatedAt: int({ mode: 'number' })
+        .notNull()
+        .default(sql`(unixepoch())`),
+}, (table) => [
+    index('idx_user_shortcuts_user').on(table.userId),
+    index('idx_user_shortcuts_action').on(table.userId, table.action),
+]);

@@ -24,21 +24,7 @@ export const createReviewSchema = z
                 invalid_type_error: 'notifyAnnotator must be a boolean',
             })
             .default(true),
-    })
-    .refine(
-        (data) => {
-            // Message is required if status is 'rejected' or 'changes_requested'
-            if (data.status === 'rejected' || data.status === 'changes_requested') {
-                //mesajı isteğe bağlı olarak da duzenleyebiliriz fakat şuan gerekli olarak bırakıyorum
-                return data.message !== undefined && data.message.trim().length > 0;
-            }
-            return true;
-        },
-        {
-            message: 'Message is required when rejecting or requesting changes',
-            path: ['message'],
-        }
-    );
+    });
 
 // Update Review Schema
 export const updateReviewSchema = z
@@ -55,24 +41,7 @@ export const updateReviewSchema = z
             .min(1, 'Message cannot be empty')
             .max(2000, 'Message cannot exceed 2000 characters')
             .optional(),
-    })
-    .refine(
-        //mesajı opsiyonel yaparsak burası da değişecek
-        (data) => {
-            // If status is being updated to rejected or changes_requested, message should be provided
-            if (
-                (data.status === 'rejected' || data.status === 'changes_requested') &&
-                (data.message === undefined || data.message.trim().length === 0)
-            ) {
-                return false;
-            }
-            return true;
-        },
-        {
-            message: 'Message is required when rejecting or requesting changes',
-            path: ['message'],
-        }
-    );
+    });
 
 // Project Review Settings Schema
 export const projectReviewSettingsSchema = z.object({

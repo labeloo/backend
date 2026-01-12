@@ -430,3 +430,56 @@ export const getEligibleReviewers = async (
         };
     }
 };
+
+/**
+ * Get user's permissions for a specific project
+ * Returns a list of permission names the user has for this project
+ */
+export const getUserProjectPermissions = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+): Promise<{ data?: { permissions: string[] }; error?: string; success: boolean }> => {
+    try {
+        const result = await db
+            .select({ permissionFlags: projectRoles.permissionFlags })
+            .from(projectRoles)
+            .innerJoin(
+                projectRelations,
+                eq(projectRoles.id, projectRelations.roleId)
+            )
+            .where(
+                and(
+                    eq(projectRelations.userId, userId),
+                    eq(projectRelations.projectId, projectId)
+                )
+            )
+            .get();
+
+        if (!result) {
+            return { data: { permissions: [] }, success: true };
+        }
+
+        // Convert permission flags to an array of permission names
+        const permissions: string[] = [];
+        const flags = result.permissionFlags;
+        
+        if (flags) {
+            if (flags.editProject) permissions.push('editProject');
+            if (flags.deleteProject) permissions.push('deleteProject');
+            if (flags.editMembers) permissions.push('editMembers');
+            if (flags.editRoles) permissions.push('editRoles');
+            if (flags.uploadFiles) permissions.push('uploadFiles');
+            if (flags.reviewAnnotations) permissions.push('reviewAnnotations');
+            if (flags.viewReviews) permissions.push('viewReviews');
+        }
+
+        return { data: { permissions }, success: true };
+    } catch (error) {
+        console.error('Error getting user project permissions:', error);
+        return {
+            error: error instanceof Error ? error.message : 'Failed to get permissions',
+            success: false,
+        };
+    }
+};

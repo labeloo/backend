@@ -397,10 +397,12 @@ export const getTasksByProject = async (db: LibSQLDatabase, projectId: number, u
             .where(eq(tasks.projectId, projectId))
             .orderBy(desc(tasks.priority), desc(tasks.createdAt));
 
-        // Group tasks by status
+        // Group tasks by status (all 5 statuses)
         const groupedTasks = {
             unassigned: allTasks.filter(task => task.status === 'unassigned'),
             annotating: allTasks.filter(task => task.status === 'annotating'),
+            in_review: allTasks.filter(task => task.status === 'in_review'),
+            changes_needed: allTasks.filter(task => task.status === 'changes_needed'),
             completed: allTasks.filter(task => task.status === 'completed')
         };
 

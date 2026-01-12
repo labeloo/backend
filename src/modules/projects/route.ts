@@ -11,6 +11,7 @@ import {
     updateProjectReviewSettings,
     getProjectReviewSettings,
     getEligibleReviewers,
+    getUserProjectPermissions,
 } from './service';
 import type { projects } from "../../db/schema";
 import { projectReviewSettingsSchema } from '../reviews/schemas';
@@ -136,6 +137,41 @@ app.delete('/:id', async (c) => {
         return c.json({ error: 'Failed to delete project', details: error.message }, 500);
     }
 })
+
+// ============================================================================
+// User Permissions Routes
+// ============================================================================
+
+// GET /api/projects/:projectId/permissions
+// Get current user's permissions for this project
+app.get('/:projectId/permissions', async (c) => {
+    try {
+        const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
+        const projectId = Number(c.req.param('projectId'));
+
+        if (isNaN(projectId)) {
+            return c.json({ error: 'Invalid project ID' }, 400);
+        }
+
+        const result = await getUserProjectPermissions(db, userId, projectId);
+
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+
+        return c.json({ data: result.data });
+    } catch (error) {
+        console.error('Error fetching user project permissions:', error);
+        return c.json(
+            {
+                error: 'Failed to fetch permissions',
+                details: error instanceof Error ? error.message : 'Unknown error',
+            },
+            500
+        );
+    }
+});
 
 // ============================================================================
 // Review Settings Routes

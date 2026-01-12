@@ -8,6 +8,7 @@ import {
     projectRelations,
     projectRoles,
     tasks,
+    users,
 } from '../../db/schema';
 import {
     createReview,
@@ -24,6 +25,7 @@ import {
 } from './schemas';
 import { canUserReview } from './workflow';
 import { checkProjectPermission } from '../../utils';
+import { completeAnnotation } from '../annotations/service';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -465,6 +467,136 @@ app.get('/reviews/assigned-to-me', async (c) => {
     } catch (error) {
         console.error('Error getting assigned reviews:', error);
         return c.json({ error: 'Failed to retrieve assigned reviews', details: error.message }, 500);
+    }
+});
+
+// ============================================================================
+// POST /api/projects/:projectId/annotations/:annotationId/complete
+// Complete an annotation and trigger the review workflow
+// ============================================================================
+app.post('/projects/:projectId/annotations/:annotationId/complete', async (c) => {
+    try {
+        const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
+        const projectId = Number(c.req.param('projectId'));
+        const annotationId = Number(c.req.param('annotationId'));
+
+        if (!projectId || isNaN(projectId)) {
+            return c.json({ error: 'Invalid project ID' }, 400);
+        }
+        if (!annotationId || isNaN(annotationId)) {
+            return c.json({ error: 'Invalid annotation ID' }, 400);
+        }
+
+        // Verify the annotation belongs to this project
+        const annotation = await db
+            .select()
+            .from(annotations)
+            .where(
+                and(
+                    eq(annotations.id, annotationId),
+                    eq(annotations.projectId, projectId)
+                )
+            )
+            .get();
+
+        if (!annotation) {
+            return c.json({ error: 'Annotation not found in this project' }, 404);
+        }
+
+        // Complete the annotation (service handles permission checks and workflow)
+        const result = await completeAnnotation(db, annotationId, userId);
+
+        if (!result.success) {
+            // Determine appropriate status code
+            const statusCode = result.error?.includes('permission') ? 403 : 
+                               result.error?.includes('not found') ? 404 : 400;
+            return c.json({ error: result.error }, statusCode);
+        }
+
+        // Build response with workflow information
+        const responseData: {
+            requiresReview: boolean;
+            isAutoApproved: boolean;
+            status: 'completed' | 'in_review';
+            assignedReviewer?: number;
+            assignedReviewerEmail?: string;
+            review?: typeof reviews.$inferSelect;
+        } = {
+            requiresReview: result.data!.requiresReview,
+            isAutoApproved: !result.data!.requiresReview,
+            status: result.data!.requiresReview ? 'in_review' : 'completed',
+            review: result.data!.review,
+        };
+
+        // If there's an assigned reviewer, fetch their email
+        if (result.data!.assignedReviewer) {
+            responseData.assignedReviewer = result.data!.assignedReviewer;
+            
+            const reviewer = await db
+                .select({ email: users.email })
+                .from(users)
+                .where(eq(users.id, result.data!.assignedReviewer))
+                .get();
+            
+            if (reviewer) {
+                responseData.assignedReviewerEmail = reviewer.email;
+            }
+        }
+
+        return c.json({ data: responseData }, 200);
+    } catch (error) {
+        console.error('Error completing annotation:', error);
+        return c.json({ 
+            error: 'Failed to complete annotation', 
+            details: error instanceof Error ? error.message : 'Unknown error' 
+        }, 500);
+    }
+});
+
+// ============================================================================
+// GET /api/projects/:projectId/workflow-mode
+// Get the current workflow mode for the project (for the current user)
+// ============================================================================
+app.get('/projects/:projectId/workflow-mode', async (c) => {
+    try {
+        const db = c.var.db;
+        const userId = c.var.jwtPayload.userId;
+        const projectId = Number(c.req.param('projectId'));
+
+        if (!projectId || isNaN(projectId)) {
+            return c.json({ error: 'Invalid project ID' }, 400);
+        }
+
+        // Import and use determineWorkflowMode
+        const { determineWorkflowMode } = await import('./workflow');
+        const workflow = await determineWorkflowMode(db, projectId, userId);
+
+        // Fetch reviewer email if assigned
+        let assignedReviewerEmail: string | undefined;
+        if (workflow.assignedReviewer) {
+            const reviewer = await db
+                .select({ email: users.email })
+                .from(users)
+                .where(eq(users.id, workflow.assignedReviewer))
+                .get();
+            
+            if (reviewer) {
+                assignedReviewerEmail = reviewer.email;
+            }
+        }
+
+        return c.json({
+            mode: workflow.mode,
+            assignedReviewer: workflow.assignedReviewer,
+            assignedReviewerEmail,
+        }, 200);
+    } catch (error) {
+        console.error('Error getting workflow mode:', error);
+        return c.json({ 
+            error: 'Failed to get workflow mode', 
+            details: error instanceof Error ? error.message : 'Unknown error' 
+        }, 500);
     }
 });
 

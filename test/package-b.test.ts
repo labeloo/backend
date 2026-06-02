@@ -97,7 +97,11 @@ describe('B1: PUT /api/annotations/:id updates an annotation', () => {
         const got = (await getRes.json()) as {
             data: { annotationData: any };
         };
-        expect(got.data.annotationData).toEqual({ shape: 'rect', x: 99, y: 100 });
+        expect(got.data.annotationData).toEqual({
+            shape: 'rect',
+            x: 99,
+            y: 100,
+        });
     });
 
     it('does NOT let the author self-approve or self-ground-truth (review fields ignored)', async () => {
@@ -175,7 +179,10 @@ describe('B1: PUT /api/annotations/:id updates an annotation', () => {
 });
 
 describe('B2: POST /api/auth/register creates an account', () => {
-    const NEW_USER = { email: 'fresh@test.com', password: 'fresh-password-123' };
+    const NEW_USER = {
+        email: 'fresh@test.com',
+        password: 'fresh-password-123',
+    };
 
     it('registers a new user and returns a usable token', async () => {
         const res = await app.request('/api/auth/register', {
@@ -220,7 +227,10 @@ describe('B2: POST /api/auth/register creates an account', () => {
         const res = await app.request('/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: 'not-an-email', password: 'whatever123' }),
+            body: JSON.stringify({
+                email: 'not-an-email',
+                password: 'whatever123',
+            }),
         });
         expect(res.status).toBe(400);
     });
@@ -229,7 +239,10 @@ describe('B2: POST /api/auth/register creates an account', () => {
         const res = await app.request('/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: 'shortpw@test.com', password: '123' }),
+            body: JSON.stringify({
+                email: 'shortpw@test.com',
+                password: '123',
+            }),
         });
         expect(res.status).toBe(400);
     });

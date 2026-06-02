@@ -1,10 +1,9 @@
 import { Hono } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { loginUser, registerUser } from './service';
 import type { UserLogin } from './types'; // Assuming you create a types.ts file
 import type { Variables } from '../../types';
 
-const auth = new Hono<{ Variables: Variables }>()
+const auth = new Hono<{ Variables: Variables }>();
 
 // POST /api/users/login
 auth.post('/login', async (c) => {
@@ -34,9 +33,10 @@ auth.post('/register', async (c) => {
         const result = await registerUser(c.var.db, body);
 
         if (!result.success) {
+            const code = result.code ?? 400;
             return c.json(
                 { error: result.error },
-                (result.code ?? 400) as ContentfulStatusCode
+                code === 409 ? 409 : code === 500 ? 500 : 400
             );
         }
 

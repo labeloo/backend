@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { loginUser } from './service';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { loginUser, registerUser } from './service';
 import type { UserLogin } from './types'; // Assuming you create a types.ts file
 import type { Variables } from '../../types';
 
@@ -19,6 +20,32 @@ auth.post('/login', async (c) => {
         return c.json(
             {
                 error: 'Failed to login',
+                message: error.message || 'Internal server error',
+            },
+            500
+        );
+    }
+});
+
+// POST /api/auth/register
+auth.post('/register', async (c) => {
+    try {
+        const body = await c.req.json<UserLogin>();
+        const result = await registerUser(c.var.db, body);
+
+        if (!result.success) {
+            return c.json(
+                { error: result.error },
+                (result.code ?? 400) as ContentfulStatusCode
+            );
+        }
+
+        return c.json(result.data, 201);
+    } catch (error) {
+        console.error('Register route error:', error);
+        return c.json(
+            {
+                error: 'Failed to register',
                 message: error.message || 'Internal server error',
             },
             500

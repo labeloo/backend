@@ -101,6 +101,62 @@ export const getAnnotationsByTaskId = async (
 };
 
 //Update annotation
+export const updateAnnotation = async (
+    db: LibSQLDatabase,
+    userId: number,
+    annotationId: number,
+    updates: Partial<typeof annotations.$inferInsert>
+) => {
+    try {
+        // Only the annotation's owner may edit it.
+        const existing = await db
+            .select()
+            .from(annotations)
+            .where(
+                and(
+                    eq(annotations.id, annotationId),
+                    eq(annotations.userId, userId)
+                )
+            )
+            .get();
+
+        if (!existing) {
+            return {
+                error: 'Annotation not found or you do not have permission to update it',
+                success: false,
+                notFound: true,
+            };
+        }
+
+        // Whitelist updatable fields — never let taskId/projectId/userId move.
+        const allowed: Partial<typeof annotations.$inferInsert> = {
+            updatedAt: Math.floor(Date.now() / 1000),
+        };
+        if (updates.annotationData !== undefined)
+            allowed.annotationData = updates.annotationData;
+        if (updates.isGroundTruth !== undefined)
+            allowed.isGroundTruth = updates.isGroundTruth;
+        if (updates.reviewStatus !== undefined)
+            allowed.reviewStatus = updates.reviewStatus;
+        if (updates.reviewerId !== undefined)
+            allowed.reviewerId = updates.reviewerId;
+
+        const result = await db
+            .update(annotations)
+            .set(allowed)
+            .where(eq(annotations.id, annotationId))
+            .returning()
+            .get();
+
+        return { data: result, success: true };
+    } catch (error) {
+        console.error('Error updating annotation:', error);
+        return {
+            error: error.message || 'Failed to update annotation',
+            success: false,
+        };
+    }
+};
 
 //delete annotation
 export const deleteAnnotation = async (

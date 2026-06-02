@@ -39,3 +39,51 @@ export const loginUser = async (
         return { error: 'Internal server error', success: false };
     }
 };
+
+export const registerUser = async (
+    db: LibSQLDatabase,
+    credentials: UserLogin
+) => {
+    const { email, password } = credentials;
+
+    if (!email || !password)
+        return { error: 'Email and password are required', success: false, code: 400 };
+    if (!email.includes('@'))
+        return { error: 'Invalid email format', success: false, code: 400 };
+    if (password.length < 6)
+        return {
+            error: 'Password must be at least 6 characters',
+            success: false,
+            code: 400,
+        };
+
+    try {
+        const existing = await db
+            .select()
+            .from(users)
+            .where(eq(users.email, email))
+            .get();
+        if (existing)
+            return { error: 'Email already registered', success: false, code: 409 };
+
+        const hash = await bcrypt.hash(password, 10);
+        const user = await db
+            .insert(users)
+            .values({ email, password: hash })
+            .returning()
+            .get();
+
+        const token = await sign(
+            { userId: user.id, email: user.email, exp: JWT_EXPIRATION },
+            JWT_SECRET
+        );
+
+        return {
+            success: true,
+            data: { token, user: { id: user.id, email: user.email } },
+        };
+    } catch (err) {
+        console.error('Error during registration:', err);
+        return { error: 'Internal server error', success: false, code: 500 };
+    }
+};

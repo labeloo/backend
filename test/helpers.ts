@@ -66,3 +66,45 @@ export async function seedUser(
     });
     return Number(res.lastInsertRowid);
 }
+
+export interface AnnotationContext {
+    orgId: number;
+    projectTypeId: number;
+    projectId: number;
+    taskId: number;
+}
+
+/**
+ * Seed the full FK chain an annotation needs (org -> project_type -> project ->
+ * task). Foreign keys ARE enforced, so annotations can't reference dangling ids.
+ */
+export async function seedAnnotationContext(
+    client: Client,
+    ownerUserId: number
+): Promise<AnnotationContext> {
+    const org = await client.execute({
+        sql: 'INSERT INTO organizations (owner_id, name) VALUES (?, ?)',
+        args: [ownerUserId, 'Test Org'],
+    });
+    const orgId = Number(org.lastInsertRowid);
+
+    const pt = await client.execute({
+        sql: 'INSERT INTO project_type (name) VALUES (?)',
+        args: ['object-detection'],
+    });
+    const projectTypeId = Number(pt.lastInsertRowid);
+
+    const project = await client.execute({
+        sql: 'INSERT INTO projects (organization_id, name, project_type) VALUES (?, ?, ?)',
+        args: [orgId, 'Test Project', projectTypeId],
+    });
+    const projectId = Number(project.lastInsertRowid);
+
+    const task = await client.execute({
+        sql: 'INSERT INTO tasks (project_id, data_url, data_type) VALUES (?, ?, ?)',
+        args: [projectId, 'placeholder.jpg', 'image'],
+    });
+    const taskId = Number(task.lastInsertRowid);
+
+    return { orgId, projectTypeId, projectId, taskId };
+}

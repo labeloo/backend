@@ -6,7 +6,7 @@ import {
 	createAnnotation,
 	getAnnotationsByTaskId,
 	deleteAnnotation,
-	// updateAnnotation, these are not implemented yet
+	updateAnnotation,
 } from "./service";
 import type { annotations } from "../../db/schema";
 
@@ -106,6 +106,34 @@ app.post("/", async (c) => {
 });
 
 //update annotation
+app.put("/:id", async (c) => {
+	try {
+		const db = c.var.db;
+		const id = c.req.param("id");
+		const userId = c.var.jwtPayload.userId;
+
+		if (!id) throw new Error("Annotation ID is required");
+
+		const body = await c.req.json<Partial<typeof annotations.$inferInsert>>();
+
+		const result = await updateAnnotation(db, userId, Number(id), body);
+
+		if (!result.success) {
+			if (result.notFound) {
+				return c.json({ error: result.error }, 404);
+			}
+			throw new Error(result.error);
+		}
+
+		return c.json({ data: result.data });
+	} catch (error) {
+		console.error("Error in update annotation route:", error);
+		return c.json(
+			{ error: "Failed to update annotation", details: error.message },
+			500,
+		);
+	}
+});
 
 //delete annotation
 app.delete("/:id", async (c) => {

@@ -128,18 +128,17 @@ export const updateAnnotation = async (
             };
         }
 
-        // Whitelist updatable fields — never let taskId/projectId/userId move.
+        // SECURITY: the author may edit ONLY the content they drew. Review
+        // fields (reviewStatus / isGroundTruth / reviewerId) are intentionally
+        // NOT writable through this endpoint — otherwise an annotator could
+        // approve and ground-truth their own work (self-approval bypass).
+        // Those belong to a separate reviewer-scoped endpoint, gated on a
+        // reviewer role.
         const allowed: Partial<typeof annotations.$inferInsert> = {
             updatedAt: Math.floor(Date.now() / 1000),
         };
         if (updates.annotationData !== undefined)
             allowed.annotationData = updates.annotationData;
-        if (updates.isGroundTruth !== undefined)
-            allowed.isGroundTruth = updates.isGroundTruth;
-        if (updates.reviewStatus !== undefined)
-            allowed.reviewStatus = updates.reviewStatus;
-        if (updates.reviewerId !== undefined)
-            allowed.reviewerId = updates.reviewerId;
 
         const result = await db
             .update(annotations)

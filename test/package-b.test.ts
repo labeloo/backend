@@ -73,22 +73,20 @@ describe('B1: PUT /api/annotations/:id updates an annotation', () => {
         expect(typeof annotationId).toBe('number');
     });
 
-    it('updates annotationData and reviewStatus and persists it', async () => {
+    it('updates annotationData and persists it', async () => {
         const res = await app.request(
             `/api/annotations/${annotationId}`,
             authed(ownerToken, {
                 method: 'PUT',
                 body: JSON.stringify({
                     annotationData: { shape: 'rect', x: 99, y: 100 },
-                    reviewStatus: 'approved',
                 }),
             })
         );
         expect(res.status).toBe(200);
         const { data } = (await res.json()) as {
-            data: { annotationData: any; reviewStatus: string };
+            data: { annotationData: any };
         };
-        expect(data.reviewStatus).toBe('approved');
         expect(data.annotationData).toEqual({ shape: 'rect', x: 99, y: 100 });
 
         // Persisted: a fresh GET reflects the change.
@@ -97,10 +95,39 @@ describe('B1: PUT /api/annotations/:id updates an annotation', () => {
             authed(ownerToken)
         );
         const got = (await getRes.json()) as {
-            data: { reviewStatus: string; annotationData: any };
+            data: { annotationData: any };
         };
-        expect(got.data.reviewStatus).toBe('approved');
         expect(got.data.annotationData).toEqual({ shape: 'rect', x: 99, y: 100 });
+    });
+
+    it('does NOT let the author self-approve or self-ground-truth (review fields ignored)', async () => {
+        const res = await app.request(
+            `/api/annotations/${annotationId}`,
+            authed(ownerToken, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    annotationData: { shape: 'rect', x: 5, y: 6 },
+                    reviewStatus: 'approved',
+                    isGroundTruth: true,
+                    reviewerId: ownerId,
+                }),
+            })
+        );
+        expect(res.status).toBe(200);
+        const { data } = (await res.json()) as {
+            data: {
+                annotationData: any;
+                reviewStatus: string;
+                isGroundTruth: boolean;
+                reviewerId: number | null;
+            };
+        };
+        // Content change applied...
+        expect(data.annotationData).toEqual({ shape: 'rect', x: 5, y: 6 });
+        // ...but review fields stay at their safe defaults.
+        expect(data.reviewStatus).toBe('pending');
+        expect(data.isGroundTruth).toBe(false);
+        expect(data.reviewerId).toBeNull();
     });
 
     it('does NOT let a different user update the annotation', async () => {
@@ -114,13 +141,16 @@ describe('B1: PUT /api/annotations/:id updates an annotation', () => {
         );
         expect(res.status).toBe(404);
 
-        // The owner's data is untouched.
+        // The owner's content is untouched by the other user's attempt.
         const getRes = await app.request(
             `/api/annotations/${annotationId}`,
             authed(ownerToken)
         );
-        const got = (await getRes.json()) as { data: { reviewStatus: string } };
-        expect(got.data.reviewStatus).toBe('approved');
+        const got = (await getRes.json()) as {
+            data: { annotationData: any; reviewStatus: string };
+        };
+        expect(got.data.annotationData).toEqual({ shape: 'rect', x: 5, y: 6 });
+        expect(got.data.reviewStatus).toBe('pending');
     });
 
     it('rejects updating an annotation that does not exist', async () => {

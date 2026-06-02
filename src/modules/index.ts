@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Variables } from '../types';
 import { jwt } from 'hono/jwt';
 import type { payloadType } from './auth/types';
+import { JWT_SECRET } from '../config';
 
 import users from './users/route';
 import auth from './auth/route';
@@ -25,7 +26,7 @@ app.route('/bucket', bucket);
 app.use(
     '*',
     jwt({
-        secret: 'honoiscool',
+        secret: JWT_SECRET,
     })
 );
 

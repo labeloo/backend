@@ -1,11 +1,12 @@
+import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { bearerAuth } from 'hono/bearer-auth';
 import { drizzle } from 'drizzle-orm/libsql/node';
 
 import type { Variables } from './types';
 import api from './modules/index';
+import { DATABASE_URL } from './config';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -24,7 +25,7 @@ app.use('*', cors({
 }));
 
 app.use('*', async (c, next) => {
-    const db = drizzle('file:database.db');
+    const db = drizzle(DATABASE_URL);
 
     const result = await db.run('select 1');
     const health = result.rows[0][0] === 1;
@@ -38,26 +39,21 @@ app.use('*', async (c, next) => {
 
 app.get('/', (c) => c.text('Hello!'));
 
-app.post('/query', async (c) => {
-    try {
-        const db = c.var.db;
-        const { query } = await c.req.json();
-        const result = await db.run(query);
-        return c.json(result);
- 
-    } catch (error) {
-        console.error('Error executing query:', error);
-        return c.json({ error: 'Failed to execute query', message: error.message }, 500);
-    }
-});
-
 app.route('/api', api);
 
-serve({
-    fetch: app.fetch,
-    port: 8787,
-}).on("listening", () => {
-    console.log("Server is running on http://localhost:8787");
-}).on("close", () => {
-    console.log("Server is closed");
-});
+// Only bind the HTTP port when run directly. Tests import `app` and drive it
+// via app.request() without starting a real server.
+if (process.env.NODE_ENV !== 'test') {
+    serve({
+        fetch: app.fetch,
+        port: 8787,
+    })
+        .on('listening', () => {
+            console.log('Server is running on http://localhost:8787');
+        })
+        .on('close', () => {
+            console.log('Server is closed');
+        });
+}
+
+export default app;

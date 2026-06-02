@@ -4,8 +4,8 @@ import type { payloadType, UserLogin } from './types';
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import { users } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
+import { JWT_SECRET } from '../../config';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'honoiscool';
 const JWT_EXPIRATION = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 37; // 37 days
 
 export const loginUser = async (

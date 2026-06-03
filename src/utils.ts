@@ -13,7 +13,7 @@ export const checkOrganizationPermission = async (
     organizationId: number,
     flag: keyof typeof organizationRoles.$inferSelect.permissionFlags
 ) => {
- /*    const permissions = await db
+    /*    const permissions = await db
         .select({ permissionFlags: organizationRoles.permissionFlags })
         .from(organizationRoles)
         .fullJoin(
@@ -28,7 +28,7 @@ export const checkOrganizationPermission = async (
         )
         .get(); */
 
-        // console.log('Checking organization permissions for user:', userId, 'in organization:', organizationId, 'for flag:', flag);
+    // console.log('Checking organization permissions for user:', userId, 'in organization:', organizationId, 'for flag:', flag);
     const permissions = await db
         .select({ permissionFlags: organizationRoles.permissionFlags })
         .from(organizationRelations)
@@ -43,7 +43,6 @@ export const checkOrganizationPermission = async (
             eq(organizationRoles.id, organizationRelations.roleId)
         )
         .get();
-console.log('Permissions found:', permissions);
 
     if (!permissions)
         throw new Error('User has no permissions for this organization');
@@ -80,11 +79,10 @@ export const checkProjectPermission = async (
 
     if (!permissions)
         throw new Error('User has no permissions for this project');
-    
+
     const hasPermission = permissions.permissionFlags[flag] ?? false;
     if (!hasPermission)
         throw new Error(`User does not have permission: ${flag}`);
 
     return true;
 };
-

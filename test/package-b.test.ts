@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
+import type { Variables } from '../src/types';
 import {
     createTestDb,
     seedAnnotationContext,
@@ -11,7 +12,7 @@ const OWNER = { email: 'owner@test.com', password: 'owner-password-123' };
 const OTHER = { email: 'other@test.com', password: 'other-password-123' };
 
 let testDb: TestDb;
-let app: Hono;
+let app: Hono<{ Variables: Variables }>;
 let ownerId: number;
 
 beforeAll(async () => {

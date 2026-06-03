@@ -39,7 +39,7 @@ config();
         password: hashedPassword,
         isActiveUser: true,
     });
-    console.log(`User ${email} created with password ${password}`);
+    console.log(`User ${email} created`);
 
     // insert role to the database. name: admin, description: admin, scope: organization, permission_flags: {"admin": true}, organization_id: 0
     await db.insert(organizationRoles).values({

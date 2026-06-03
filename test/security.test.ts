@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Hono } from 'hono';
+import type { Variables } from '../src/types';
 import { createTestDb, seedUser, type TestDb } from './helpers';
 
 const OWNER_EMAIL = 'owner@test.com';
 const OWNER_PASSWORD = 'correct-horse-battery-staple';
 
 let testDb: TestDb;
-let app: Hono;
+let app: Hono<{ Variables: Variables }>;
 
 beforeAll(async () => {
     testDb = await createTestDb();

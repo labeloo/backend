@@ -34,7 +34,16 @@ app.use(
         ],
         credentials: true,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['*'],
+        // Explicit list (wildcard is invalid with credentials:true). Includes the
+        // custom headers the frontend sends for resource scoping.
+        allowHeaders: [
+            'Content-Type',
+            'Authorization',
+            'orgId',
+            'projectId',
+            'id',
+            'word',
+        ],
     })
 );
 

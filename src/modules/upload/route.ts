@@ -14,6 +14,10 @@ app.get('/public/:uuid', (c) => {
     try {
         const uuid = c.req.param('uuid');
         if (!uuid) throw new Error('UUID is required');
+        // Only accept a canonical UUID — blocks path traversal via the param.
+        const UUID_RE =
+            /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+        if (!UUID_RE.test(uuid)) throw new Error('Invalid UUID');
         const filePath = `./bucket/public/${uuid}.png`;
         if (!filePath) throw new Error('Profile picture not found');
         const fileExists = fs.existsSync(filePath);
@@ -53,7 +57,18 @@ app.get('/taskData/:projectId/:fileName', (c) => {
         if (!projectId || !fileName)
             throw new Error('Project ID and file name are required');
 
-        const filePath = `./bucket/projects/${projectId}/${fileName}`;
+        // Harden against path traversal: numeric project id + a plain filename
+        // that cannot contain separators or `..`, plus a final boundary check.
+        if (!/^[0-9]+$/.test(projectId)) throw new Error('Invalid project ID');
+        const safeName = path.basename(fileName);
+        if (safeName !== fileName || fileName.includes('\0')) {
+            throw new Error('Invalid file name');
+        }
+        const baseDir = path.resolve(`./bucket/projects/${projectId}`);
+        const filePath = path.resolve(baseDir, safeName);
+        if (!filePath.startsWith(baseDir + path.sep)) {
+            throw new Error('Invalid file path');
+        }
 
         if (!fs.existsSync(filePath)) {
             throw new Error('File not found');

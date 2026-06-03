@@ -101,3 +101,26 @@ describe('A2: JWT secret is centralized and consistent', () => {
         vi.resetModules();
     });
 });
+
+describe('A2b: /bucket routes verify with the central JWT secret', () => {
+    it('rejects an upload with no token (401)', async () => {
+        const res = await app.request('/api/bucket/uploadData', {
+            method: 'POST',
+        });
+        expect(res.status).toBe(401);
+    });
+
+    it('accepts a token signed by the login path (NOT 401)', async () => {
+        const loginRes = await login(OWNER_EMAIL, OWNER_PASSWORD);
+        const { token } = (await loginRes.json()) as { token: string };
+
+        const res = await app.request('/api/bucket/uploadData', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        // It passes auth and only fails later (missing projectId/files).
+        // Before the fix, the bucket middleware verified with a stale hardcoded
+        // secret and returned 401 for valid tokens.
+        expect(res.status).not.toBe(401);
+    });
+});

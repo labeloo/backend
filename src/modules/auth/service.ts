@@ -8,17 +8,19 @@ import { JWT_SECRET } from '../../config';
 
 const JWT_EXPIRATION = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 37; // 37 days
 
-export const loginUser = async (
-    db: LibSQLDatabase,
-    credentials: UserLogin
-) => {
+export const loginUser = async (db: LibSQLDatabase, credentials: UserLogin) => {
     try {
         const { email, password } = credentials;
 
-        if (!email || !password) throw new Error('Email and password are required');
+        if (!email || !password)
+            throw new Error('Email and password are required');
         if (!email.includes('@')) throw new Error('Invalid email format');
 
-        const user = await db.select().from(users).where(eq(users.email, email)).get();
+        const user = await db
+            .select()
+            .from(users)
+            .where(eq(users.email, email))
+            .get();
         if (!user) throw new Error('User not found');
 
         const passwordMatch = await bcrypt.compare(password, user.password);
@@ -47,7 +49,11 @@ export const registerUser = async (
     const { email, password } = credentials;
 
     if (!email || !password)
-        return { error: 'Email and password are required', success: false, code: 400 };
+        return {
+            error: 'Email and password are required',
+            success: false,
+            code: 400,
+        };
     if (!email.includes('@'))
         return { error: 'Invalid email format', success: false, code: 400 };
     if (password.length < 6)
@@ -64,7 +70,11 @@ export const registerUser = async (
             .where(eq(users.email, email))
             .get();
         if (existing)
-            return { error: 'Email already registered', success: false, code: 409 };
+            return {
+                error: 'Email already registered',
+                success: false,
+                code: 409,
+            };
 
         const hash = await bcrypt.hash(password, 10);
         const user = await db

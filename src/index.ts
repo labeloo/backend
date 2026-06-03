@@ -10,19 +10,33 @@ import { DATABASE_URL } from './config';
 
 const app = new Hono<{ Variables: Variables }>();
 
-app.use('/api/auth/login', cors({
-    origin: ['http://192.168.1.8:3000', 'http://localhost:3000','http://0.0.0.0:3000'],
-    credentials: true,
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(
+    '/api/auth/login',
+    cors({
+        origin: [
+            'http://192.168.1.8:3000',
+            'http://localhost:3000',
+            'http://0.0.0.0:3000',
+        ],
+        credentials: true,
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['Content-Type', 'Authorization'],
+    })
+);
 
-app.use('*', cors({
-    origin: ['http://192.168.1.8:3000', 'http://localhost:3000','http://0.0.0.0:3000'],
-    credentials: true,
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['*'],
-}));
+app.use(
+    '*',
+    cors({
+        origin: [
+            'http://192.168.1.8:3000',
+            'http://localhost:3000',
+            'http://0.0.0.0:3000',
+        ],
+        credentials: true,
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['*'],
+    })
+);
 
 app.use('*', async (c, next) => {
     const db = drizzle(DATABASE_URL);

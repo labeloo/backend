@@ -5,6 +5,7 @@ import fs from 'fs';
 import { jwt } from 'hono/jwt';
 import path from 'path';
 import unzipper from 'unzipper';
+import { JWT_SECRET } from '../../config';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -21,19 +22,27 @@ app.get('/public/:uuid', (c) => {
         const fileBuffer = fs.readFileSync(filePath);
         if (!fileBuffer) throw new Error('Failed to read profile picture file');
 
-        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
-            'Content-Type': 'image/jpeg', // Adjust based on your file type
-        });
+        return c.body(
+            fileBuffer.buffer.slice(
+                fileBuffer.byteOffset,
+                fileBuffer.byteOffset + fileBuffer.byteLength
+            ),
+            200,
+            {
+                'Content-Type': 'image/jpeg', // Adjust based on your file type
+            }
+        );
     } catch (error) {
         console.error('Error in get profile picture route:', error);
         return c.json(
-            { error: 'Failed to retrieve profile picture', details: error.message },
+            {
+                error: 'Failed to retrieve profile picture',
+                details: error.message,
+            },
             500
         );
     }
 });
-
-
 
 // Get project files (now supports both UUID and original filename lookup)
 app.get('/taskData/:projectId/:fileName', (c) => {
@@ -41,17 +50,18 @@ app.get('/taskData/:projectId/:fileName', (c) => {
         const projectId = c.req.param('projectId');
         const fileName = c.req.param('fileName');
 
-        if (!projectId || !fileName) throw new Error('Project ID and file name are required');
-        
+        if (!projectId || !fileName)
+            throw new Error('Project ID and file name are required');
+
         const filePath = `./bucket/projects/${projectId}/${fileName}`;
-        
+
         if (!fs.existsSync(filePath)) {
             throw new Error('File not found');
         }
 
         const fileBuffer = fs.readFileSync(filePath);
         const fileExt = path.extname(fileName).toLowerCase();
-        
+
         let contentType = 'application/octet-stream';
         if (['.jpg', '.jpeg'].includes(fileExt)) {
             contentType = 'image/jpeg';
@@ -65,24 +75,32 @@ app.get('/taskData/:projectId/:fileName', (c) => {
             contentType = 'image/bmp';
         }
 
-        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
-            'Content-Type': contentType,
-        });
+        return c.body(
+            fileBuffer.buffer.slice(
+                fileBuffer.byteOffset,
+                fileBuffer.byteOffset + fileBuffer.byteLength
+            ),
+            200,
+            {
+                'Content-Type': contentType,
+            }
+        );
     } catch (error) {
         console.error('Error in get project file route:', error);
         return c.json(
-            { error: 'Failed to retrieve project file', details: error.message },
+            {
+                error: 'Failed to retrieve project file',
+                details: error.message,
+            },
             500
         );
     }
 });
 
-
-
 app.use(
     '*',
     jwt({
-        secret: 'honoiscool',
+        secret: JWT_SECRET,
     })
 );
 
@@ -91,8 +109,8 @@ app.post('/uploadPicture', async (c) => {
     try {
         // Handle file upload logic here
         const file = await c.req.arrayBuffer();
-        if (!file) throw new Error('Profile picture file is required');      
-        
+        if (!file) throw new Error('Profile picture file is required');
+
         const uuid = crypto.randomUUID();
         const uploadPath = `./bucket/public/${uuid}.png`;
 
@@ -102,7 +120,7 @@ app.post('/uploadPicture', async (c) => {
         if (!result) throw new Error('Failed to save profile picture');
 
         return c.json({
-            url: `/api/bucket/public/${uuid}`, 
+            url: `/api/bucket/public/${uuid}`,
         });
     } catch (error) {
         console.error('Error in upload profile picture route:', error);
@@ -125,7 +143,7 @@ app.post('/uploadData', async (c) => {
 
         const formData = await c.req.formData();
         const files = formData.getAll('files');
-        
+
         if (!files || files.length === 0) {
             throw new Error('At least one file is required');
         }
@@ -133,7 +151,7 @@ app.post('/uploadData', async (c) => {
         // Create project directories
         const projectDir = `./bucket/projects/${projectId}`;
         const rawDir = `${projectDir}/raw`;
-        
+
         if (!fs.existsSync(projectDir)) {
             fs.mkdirSync(projectDir, { recursive: true });
         }
@@ -143,31 +161,38 @@ app.post('/uploadData', async (c) => {
 
         const uploadedFiles = [];
         const createdTasks = [];
-        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+        const imageExtensions = [
+            '.jpg',
+            '.jpeg',
+            '.png',
+            '.gif',
+            '.bmp',
+            '.webp',
+        ];
 
         for (const file of files) {
             if (file instanceof File) {
                 const fileBuffer = await file.arrayBuffer();
                 const originalFileName = file.name || 'unknown';
                 const fileExt = path.extname(originalFileName).toLowerCase();
-                
+
                 if (fileExt === '.zip') {
                     // Save zip file to raw directory with UUID
                     const uuid = crypto.randomUUID();
                     const zipFileName = `${uuid}.zip`;
                     const zipPath = `${rawDir}/${zipFileName}`;
                     const result = await saveFile(fileBuffer, zipPath);
-                    
+
                     if (result) {
                         try {
                             // Extract zip file and filter for images only
                             const extractedFiles: any[] = [];
-                            
+
                             // Create a readable stream from the buffer
                             const stream = require('stream');
                             const bufferStream = new stream.PassThrough();
                             bufferStream.end(Buffer.from(fileBuffer));
-                            
+
                             // Extract zip contents
                             await new Promise((resolve, reject) => {
                                 bufferStream
@@ -175,47 +200,80 @@ app.post('/uploadData', async (c) => {
                                     .on('entry', async (entry: any) => {
                                         const entryFileName = entry.path;
                                         const type = entry.type;
-                                        const entryFileExt = path.extname(entryFileName).toLowerCase();
-                                        
+                                        const entryFileExt = path
+                                            .extname(entryFileName)
+                                            .toLowerCase();
+
                                         // Only process image files
-                                        if (type === 'File' && imageExtensions.includes(entryFileExt)) {
-                                            const imageUuid = crypto.randomUUID();
+                                        if (
+                                            type === 'File' &&
+                                            imageExtensions.includes(
+                                                entryFileExt
+                                            )
+                                        ) {
+                                            const imageUuid =
+                                                crypto.randomUUID();
                                             const imageName = `${imageUuid}${entryFileExt}`;
-                                            const imagePath = path.join(projectDir, imageName);
-                                            const writeStream = fs.createWriteStream(imagePath);
-                                            
+                                            const imagePath = path.join(
+                                                projectDir,
+                                                imageName
+                                            );
+                                            const writeStream =
+                                                fs.createWriteStream(imagePath);
+
                                             entry.pipe(writeStream);
-                                            
-                                            writeStream.on('close', async () => {
-                                                const imageUrl = `/api/bucket/taskData/${projectId}/${imageName}`;
-                                                
-                                                // Create task for the extracted image
-                                                const taskResult = await createTask(
-                                                    db,
-                                                    parseInt(projectId),
-                                                    imageUrl,
-                                                    'image',
-                                                    {
-                                                        originalFileName: path.basename(entryFileName),
-                                                        extractedFrom: originalFileName,
-                                                        mimeType: `image/${entryFileExt.substring(1)}`,
-                                                        uuid: imageUuid
+
+                                            writeStream.on(
+                                                'close',
+                                                async () => {
+                                                    const imageUrl = `/api/bucket/taskData/${projectId}/${imageName}`;
+
+                                                    // Create task for the extracted image
+                                                    const taskResult =
+                                                        await createTask(
+                                                            db,
+                                                            parseInt(projectId),
+                                                            imageUrl,
+                                                            'image',
+                                                            {
+                                                                originalFileName:
+                                                                    path.basename(
+                                                                        entryFileName
+                                                                    ),
+                                                                extractedFrom:
+                                                                    originalFileName,
+                                                                mimeType: `image/${entryFileExt.substring(1)}`,
+                                                                uuid: imageUuid,
+                                                            }
+                                                        );
+                                                    if (
+                                                        taskResult.success &&
+                                                        taskResult.data
+                                                    ) {
+                                                        createdTasks.push(
+                                                            taskResult.data
+                                                        );
                                                     }
-                                                );
-                                                  if (taskResult.success && taskResult.data) {
-                                                    createdTasks.push(taskResult.data);
+
+                                                    extractedFiles.push({
+                                                        type: 'extracted_image',
+                                                        uuid: imageUuid,
+                                                        fileName: imageName,
+                                                        originalFileName:
+                                                            path.basename(
+                                                                entryFileName
+                                                            ),
+                                                        path: imagePath,
+                                                        url: imageUrl,
+                                                        taskId:
+                                                            taskResult.success &&
+                                                            taskResult.data
+                                                                ? taskResult
+                                                                      .data.id
+                                                                : null,
+                                                    });
                                                 }
-                                                
-                                                extractedFiles.push({
-                                                    type: 'extracted_image',
-                                                    uuid: imageUuid,
-                                                    fileName: imageName,
-                                                    originalFileName: path.basename(entryFileName),
-                                                    path: imagePath,
-                                                    url: imageUrl,
-                                                    taskId: (taskResult.success && taskResult.data) ? taskResult.data.id : null
-                                                });
-                                            });
+                                            );
                                         } else {
                                             // Skip non-image files
                                             entry.autodrain();
@@ -224,27 +282,30 @@ app.post('/uploadData', async (c) => {
                                     .on('finish', resolve)
                                     .on('error', reject);
                             });
-                            
+
                             uploadedFiles.push({
                                 type: 'zip',
                                 uuid: uuid,
                                 fileName: zipFileName,
                                 originalFileName: originalFileName,
                                 path: zipPath,
-                                message: `Zip file extracted successfully. ${extractedFiles.length} image(s) found and ${createdTasks.filter(t => t).length} tasks created.`,
-                                extractedFiles: extractedFiles
+                                message: `Zip file extracted successfully. ${extractedFiles.length} image(s) found and ${createdTasks.filter((t) => t).length} tasks created.`,
+                                extractedFiles: extractedFiles,
                             });
-                            
                         } catch (extractError: any) {
-                            console.error('Error extracting zip:', extractError);
+                            console.error(
+                                'Error extracting zip:',
+                                extractError
+                            );
                             uploadedFiles.push({
                                 type: 'zip',
                                 uuid: uuid,
                                 fileName: zipFileName,
                                 originalFileName: originalFileName,
                                 path: zipPath,
-                                message: 'Zip file saved but extraction failed. Please check the zip file format.',
-                                error: extractError.message
+                                message:
+                                    'Zip file saved but extraction failed. Please check the zip file format.',
+                                error: extractError.message,
                             });
                         }
                     }
@@ -254,10 +315,10 @@ app.post('/uploadData', async (c) => {
                     const imageName = `${imageUuid}${fileExt}`;
                     const imagePath = `${projectDir}/${imageName}`;
                     const result = await saveFile(fileBuffer, imagePath);
-                    
+
                     if (result) {
                         const imageUrl = `/api/bucket/taskData/${projectId}/${imageName}`;
-                        
+
                         // Create task for the direct image upload
                         const taskResult = await createTask(
                             db,
@@ -267,13 +328,13 @@ app.post('/uploadData', async (c) => {
                             {
                                 originalFileName: originalFileName,
                                 mimeType: `image/${fileExt.substring(1)}`,
-                                uuid: imageUuid
+                                uuid: imageUuid,
                             }
                         );
-                          if (taskResult.success && taskResult.data) {
+                        if (taskResult.success && taskResult.data) {
                             createdTasks.push(taskResult.data);
                         }
-                        
+
                         uploadedFiles.push({
                             type: 'image',
                             uuid: imageUuid,
@@ -281,7 +342,10 @@ app.post('/uploadData', async (c) => {
                             originalFileName: originalFileName,
                             path: imagePath,
                             url: imageUrl,
-                            taskId: (taskResult.success && taskResult.data) ? taskResult.data.id : null
+                            taskId:
+                                taskResult.success && taskResult.data
+                                    ? taskResult.data.id
+                                    : null,
                         });
                     }
                 } else {
@@ -289,7 +353,8 @@ app.post('/uploadData', async (c) => {
                     uploadedFiles.push({
                         type: 'skipped',
                         fileName: originalFileName,
-                        message: 'File skipped - only images and zip files are allowed'
+                        message:
+                            'File skipped - only images and zip files are allowed',
                     });
                 }
             }
@@ -300,7 +365,7 @@ app.post('/uploadData', async (c) => {
             projectId: projectId,
             uploadedFiles: uploadedFiles,
             createdTasks: createdTasks.length,
-            projectDir: projectDir
+            projectDir: projectDir,
         });
     } catch (error) {
         console.error('Error in upload data route:', error);
@@ -313,6 +378,5 @@ app.post('/uploadData', async (c) => {
         );
     }
 });
-
 
 export default app;

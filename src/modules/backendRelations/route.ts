@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono } from 'hono';
 import type { Variables } from '../../types';
 import {
     getBackendTypes,
@@ -8,7 +8,7 @@ import {
     updateBackendRelation,
     deleteBackendRelation,
 } from './service';
-import type { backendRelations } from "../../db/schema";
+import type { backendRelations } from '../../db/schema';
 import { assertOrganizationMember } from '../../utils';
 
 const app = new Hono<{ Variables: Variables }>();
@@ -21,7 +21,13 @@ app.get('/types', async (c) => {
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in get backend types route:', error);
-        return c.json({ error: 'Failed to retrieve backend types', details: error.message }, 500);
+        return c.json(
+            {
+                error: 'Failed to retrieve backend types',
+                details: error.message,
+            },
+            500
+        );
     }
 });
 
@@ -33,8 +39,12 @@ app.get('/', async (c) => {
         if (!organizationId) throw new Error('Organization ID is required');
 
         // IDOR guard: the caller must belong to the org they are addressing.
-        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
-        
+        await assertOrganizationMember(
+            db,
+            c.var.jwtPayload.userId,
+            Number(organizationId)
+        );
+
         const result = await getBackendRelations(db, Number(organizationId));
 
         if (!result.success) throw new Error(result.error);
@@ -42,7 +52,10 @@ app.get('/', async (c) => {
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in get backends route:', error);
-        return c.json({ error: 'Failed to retrieve backends', details: error.message }, 500);
+        return c.json(
+            { error: 'Failed to retrieve backends', details: error.message },
+            500
+        );
     }
 });
 
@@ -52,19 +65,30 @@ app.get('/:id', async (c) => {
         const db = c.var.db;
         const id = c.req.param('id');
         const organizationId = c.req.header('orgId');
-        
+
         if (!id) throw new Error('Backend ID is required');
         if (!organizationId) throw new Error('Organization ID is required');
 
         // IDOR guard: the caller must belong to the org they are addressing.
-        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+        await assertOrganizationMember(
+            db,
+            c.var.jwtPayload.userId,
+            Number(organizationId)
+        );
 
-        const result = await getBackendRelationById(db, Number(id), Number(organizationId));
+        const result = await getBackendRelationById(
+            db,
+            Number(id),
+            Number(organizationId)
+        );
         if (!result.success) throw new Error(result.error);
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in get backend by id route:', error);
-        return c.json({ error: 'Failed to retrieve backend', details: error.message }, 500);
+        return c.json(
+            { error: 'Failed to retrieve backend', details: error.message },
+            500
+        );
     }
 });
 
@@ -76,7 +100,11 @@ app.post('/', async (c) => {
         if (!organizationId) throw new Error('Organization ID is required');
 
         // IDOR guard: the caller must belong to the org they are addressing.
-        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+        await assertOrganizationMember(
+            db,
+            c.var.jwtPayload.userId,
+            Number(organizationId)
+        );
 
         const body = await c.req.json<typeof backendRelations.$inferInsert>();
 
@@ -95,7 +123,10 @@ app.post('/', async (c) => {
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in create backend route:', error);
-        return c.json({ error: 'Failed to create backend', details: error.message }, 500);
+        return c.json(
+            { error: 'Failed to create backend', details: error.message },
+            500
+        );
     }
 });
 
@@ -110,18 +141,31 @@ app.put('/:id', async (c) => {
         if (!organizationId) throw new Error('Organization ID is required');
 
         // IDOR guard: the caller must belong to the org they are addressing.
-        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+        await assertOrganizationMember(
+            db,
+            c.var.jwtPayload.userId,
+            Number(organizationId)
+        );
 
-        const body = await c.req.json<Partial<typeof backendRelations.$inferInsert>>();
+        const body =
+            await c.req.json<Partial<typeof backendRelations.$inferInsert>>();
 
-        const result = await updateBackendRelation(db, Number(id), Number(organizationId), body);
+        const result = await updateBackendRelation(
+            db,
+            Number(id),
+            Number(organizationId),
+            body
+        );
 
         if (!result.success) throw new Error(result.error);
 
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in update backend route:', error);
-        return c.json({ error: 'Failed to update backend', details: error.message }, 500);
+        return c.json(
+            { error: 'Failed to update backend', details: error.message },
+            500
+        );
     }
 });
 
@@ -136,16 +180,27 @@ app.delete('/:id', async (c) => {
         if (!organizationId) throw new Error('Organization ID is required');
 
         // IDOR guard: the caller must belong to the org they are addressing.
-        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+        await assertOrganizationMember(
+            db,
+            c.var.jwtPayload.userId,
+            Number(organizationId)
+        );
 
-        const result = await deleteBackendRelation(db, Number(id), Number(organizationId));
+        const result = await deleteBackendRelation(
+            db,
+            Number(id),
+            Number(organizationId)
+        );
 
         if (!result.success) throw new Error(result.error);
 
         return c.json({ data: result.data });
     } catch (error) {
         console.error('Error in delete backend route:', error);
-        return c.json({ error: 'Failed to delete backend', details: error.message }, 500);
+        return c.json(
+            { error: 'Failed to delete backend', details: error.message },
+            500
+        );
     }
 });
 

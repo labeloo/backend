@@ -113,14 +113,20 @@ describe('backendRelations enforces org membership (no cross-org IDOR)', () => {
 
         const tokenB = await login(B);
         const outsiderRes = await app.request('/api/backendRelations', {
-            headers: { Authorization: `Bearer ${tokenB}`, orgId: String(orgId) },
+            headers: {
+                Authorization: `Bearer ${tokenB}`,
+                orgId: String(orgId),
+            },
         });
         expect(outsiderRes.status).not.toBe(200);
         expect(await outsiderRes.text()).toMatch(/not a member/i);
 
         const tokenA = await login(A);
         const memberRes = await app.request('/api/backendRelations', {
-            headers: { Authorization: `Bearer ${tokenA}`, orgId: String(orgId) },
+            headers: {
+                Authorization: `Bearer ${tokenA}`,
+                orgId: String(orgId),
+            },
         });
         // The member passes the membership guard (it is NOT rejected as a
         // non-member). (The list query itself has an unrelated pre-existing

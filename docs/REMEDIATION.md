@@ -12,15 +12,18 @@ Severity note (owner re-triage): "test type errors break docker" is FALSE (docke
 - [ ] fix 2 test-file type errors (`let app: Hono<{Variables}>`) + add `typecheck` npm script.
 
 ## Wave 2 — Backend IDOR membership checks (trust client org/project IDs)
-Add membership/permission verification before acting. Use existing utils.ts checkOrganizationPermission/checkProjectPermission or a new assertMembership helper.
+Added `assertOrganizationMember`/`assertProjectMember`/`isOrganizationMember`/`isProjectMember` to utils.ts.
+- [x] DONE backendRelations all endpoints — added assertOrganizationMember guard (was cross-org apiKey IDOR). Tested.
+- [x] VERIFIED-SAFE organizations GET /:id, /all, PUT, DELETE — service already joins organizationRelations by userId / uses checkOrganizationPermission. The sweep "IDOR" findings were false (verifier hadn't read the service). NO change needed.
 - [ ] projects GET /all (orgId header) — already filters by userId via projectRelations; add explicit org membership assert.
 - [ ] projectRelations /users + /addUser (projectId header) — verify membership/role.
 - [ ] organizationRoles getById + delete (no membership / no orgId in WHERE).
 - [ ] projectRoles getById.
-- [ ] backendRelations all endpoints (orgId header, no membership).
 - [ ] annotations GET /task/:taskId + POST / (no project membership check).
-- [ ] organizations GET /:id — VERIFY (getOrganizationById takes userId; may already check). Confirm before changing.
 - [ ] /bucket/taskData auth — RISKY: frontend loads images; check AuthenticatedImage.vue/useImageUrl before moving behind JWT.
+
+### NEW BUG found via testing (parked feature, not fixed): backend_relations migration drift
+drizzle/0001 creates `backend_relations` with `backend_type_id`(+`backend_type` table), but schema.ts uses `backend_id` text. No migration regenerated → on a FRESH (migration-built) DB, ALL backendRelations queries fail ("no such column: backend_id"). Live database.db has the new column (pushed differently). Since the whole backendRelations feature is AI-config (parked), defer; fix with `drizzle-kit generate` when un-parking. The IDOR test asserts the guard via membership-error discrimination, not a 200, to avoid coupling to this.
 
 ## Wave 3 — Backend correctness
 - [ ] organizations route.ts:~97 brace/return logic (verify).

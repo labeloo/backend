@@ -9,6 +9,7 @@ import {
     deleteBackendRelation,
 } from './service';
 import type { backendRelations } from "../../db/schema";
+import { assertOrganizationMember } from '../../utils';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -30,6 +31,9 @@ app.get('/', async (c) => {
         const db = c.var.db;
         const organizationId = c.req.header('orgId');
         if (!organizationId) throw new Error('Organization ID is required');
+
+        // IDOR guard: the caller must belong to the org they are addressing.
+        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
         
         const result = await getBackendRelations(db, Number(organizationId));
 
@@ -52,6 +56,9 @@ app.get('/:id', async (c) => {
         if (!id) throw new Error('Backend ID is required');
         if (!organizationId) throw new Error('Organization ID is required');
 
+        // IDOR guard: the caller must belong to the org they are addressing.
+        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+
         const result = await getBackendRelationById(db, Number(id), Number(organizationId));
         if (!result.success) throw new Error(result.error);
         return c.json({ data: result.data });
@@ -67,6 +74,9 @@ app.post('/', async (c) => {
         const db = c.var.db;
         const organizationId = c.req.header('orgId');
         if (!organizationId) throw new Error('Organization ID is required');
+
+        // IDOR guard: the caller must belong to the org they are addressing.
+        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
 
         const body = await c.req.json<typeof backendRelations.$inferInsert>();
 
@@ -99,6 +109,9 @@ app.put('/:id', async (c) => {
         if (!id) throw new Error('Backend ID is required');
         if (!organizationId) throw new Error('Organization ID is required');
 
+        // IDOR guard: the caller must belong to the org they are addressing.
+        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
+
         const body = await c.req.json<Partial<typeof backendRelations.$inferInsert>>();
 
         const result = await updateBackendRelation(db, Number(id), Number(organizationId), body);
@@ -121,6 +134,9 @@ app.delete('/:id', async (c) => {
 
         if (!id) throw new Error('Backend ID is required');
         if (!organizationId) throw new Error('Organization ID is required');
+
+        // IDOR guard: the caller must belong to the org they are addressing.
+        await assertOrganizationMember(db, c.var.jwtPayload.userId, Number(organizationId));
 
         const result = await deleteBackendRelation(db, Number(id), Number(organizationId));
 

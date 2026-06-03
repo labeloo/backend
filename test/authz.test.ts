@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Variables } from '../src/types';
-import { createTestDb, seedUser, type TestDb } from './helpers';
+import {
+    createTestDb,
+    seedOrgWithMember,
+    seedUser,
+    type TestDb,
+} from './helpers';
 
 const A = { email: 'a@test.com', password: 'a-password-123' };
 const B = { email: 'b@test.com', password: 'b-password-123' };
@@ -98,5 +103,54 @@ describe('bucket file routes resist path traversal', () => {
             '/api/bucket/public/..%2F..%2F..%2Fpackage'
         );
         expect(res.status).not.toBe(200);
+    });
+});
+
+describe('backendRelations enforces org membership (no cross-org IDOR)', () => {
+    it('rejects a non-member as a non-member, lets a member past the guard', async () => {
+        // A is a member of orgA; B is not.
+        const { orgId } = await seedOrgWithMember(testDb.client, idA);
+
+        const tokenB = await login(B);
+        const outsiderRes = await app.request('/api/backendRelations', {
+            headers: { Authorization: `Bearer ${tokenB}`, orgId: String(orgId) },
+        });
+        expect(outsiderRes.status).not.toBe(200);
+        expect(await outsiderRes.text()).toMatch(/not a member/i);
+
+        const tokenA = await login(A);
+        const memberRes = await app.request('/api/backendRelations', {
+            headers: { Authorization: `Bearer ${tokenA}`, orgId: String(orgId) },
+        });
+        // The member passes the membership guard (it is NOT rejected as a
+        // non-member). (The list query itself has an unrelated pre-existing
+        // migration-drift bug for this parked feature — see REMEDIATION.md.)
+        expect(await memberRes.text()).not.toMatch(/not a member/i);
+    });
+
+    it('a non-member cannot create a backend relation (steal/poison API keys) for another org', async () => {
+        const { orgId } = await seedOrgWithMember(testDb.client, idA);
+        const tokenB = await login(B);
+        const res = await app.request('/api/backendRelations', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${tokenB}`,
+                'Content-Type': 'application/json',
+                orgId: String(orgId),
+            },
+            body: JSON.stringify({
+                backendId: 'openai',
+                baseUrl: 'https://evil.example',
+                apiKey: 'sk-stolen',
+                isActive: true,
+            }),
+        });
+        expect(res.status).not.toBe(200);
+        // Nothing was written for that org.
+        const rows = await testDb.client.execute({
+            sql: 'SELECT COUNT(*) AS n FROM backend_relations WHERE organization_id = ?',
+            args: [orgId],
+        });
+        expect(Number(rows.rows[0].n)).toBe(0);
     });
 });

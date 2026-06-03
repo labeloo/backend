@@ -108,3 +108,31 @@ export async function seedAnnotationContext(
 
     return { orgId, projectTypeId, projectId, taskId };
 }
+
+/**
+ * Seed an organization where `userId` IS a member (org + admin role + relation).
+ * Used to test IDOR guards: a different user should be denied for this org.
+ */
+export async function seedOrgWithMember(
+    client: Client,
+    userId: number
+): Promise<{ orgId: number; roleId: number }> {
+    const org = await client.execute({
+        sql: 'INSERT INTO organizations (owner_id, name) VALUES (?, ?)',
+        args: [userId, 'Member Org'],
+    });
+    const orgId = Number(org.lastInsertRowid);
+
+    const role = await client.execute({
+        sql: 'INSERT INTO organization_roles (name, organization_id, permission_flags) VALUES (?, ?, ?)',
+        args: ['admin', orgId, JSON.stringify({ admin: true })],
+    });
+    const roleId = Number(role.lastInsertRowid);
+
+    await client.execute({
+        sql: 'INSERT INTO organization_relations (user_id, organization_id, role_id) VALUES (?, ?, ?)',
+        args: [userId, orgId, roleId],
+    });
+
+    return { orgId, roleId };
+}

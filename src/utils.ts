@@ -86,3 +86,63 @@ export const checkProjectPermission = async (
 
     return true;
 };
+
+/** True if the user has any relation (membership) to the organization. */
+export const isOrganizationMember = async (
+    db: LibSQLDatabase,
+    userId: number,
+    organizationId: number
+) => {
+    const rel = await db
+        .select({ id: organizationRelations.id })
+        .from(organizationRelations)
+        .where(
+            and(
+                eq(organizationRelations.userId, userId),
+                eq(organizationRelations.organizationId, organizationId)
+            )
+        )
+        .get();
+    return !!rel;
+};
+
+/** Throws unless the user is a member of the organization. */
+export const assertOrganizationMember = async (
+    db: LibSQLDatabase,
+    userId: number,
+    organizationId: number
+) => {
+    if (!(await isOrganizationMember(db, userId, organizationId)))
+        throw new Error('User is not a member of this organization');
+    return true;
+};
+
+/** True if the user has any relation (membership) to the project. */
+export const isProjectMember = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+) => {
+    const rel = await db
+        .select({ id: projectRelations.id })
+        .from(projectRelations)
+        .where(
+            and(
+                eq(projectRelations.userId, userId),
+                eq(projectRelations.projectId, projectId)
+            )
+        )
+        .get();
+    return !!rel;
+};
+
+/** Throws unless the user is a member of the project. */
+export const assertProjectMember = async (
+    db: LibSQLDatabase,
+    userId: number,
+    projectId: number
+) => {
+    if (!(await isProjectMember(db, userId, projectId)))
+        throw new Error('User is not a member of this project');
+    return true;
+};

@@ -8,6 +8,60 @@
  * secret key is present. The routes never name a vendor; they ask the provider.
  */
 
+
+/**
+ * Verify a Stripe webhook signature (t=,v1= scheme) with Web Crypto, so it runs
+ * on both Node and a Worker. Without this the webhook is an open door: it carries
+ * no user auth, so a forged body would let anyone grant their org any plan. An
+ * event older than the tolerance is rejected too, to stop a captured one being
+ * replayed. Empty secret => cannot verify => reject.
+ */
+const TOLERANCE_SECONDS = 5 * 60;
+
+const timingSafeEqualHex = (a: string, b: string): boolean => {
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+};
+
+export const verifyStripeSignature = async (
+    rawBody: string,
+    header: string | null,
+    secret: string
+): Promise<boolean> => {
+    if (!secret || !header) return false;
+
+    const parts = Object.fromEntries(
+        header.split(',').map((kv) => {
+            const i = kv.indexOf('=');
+            return [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
+        })
+    );
+    const timestamp = parts['t'];
+    const given = parts['v1'];
+    if (!timestamp || !given) return false;
+
+    const age = Math.floor(Date.now() / 1000) - Number(timestamp);
+    if (!Number.isFinite(age) || Math.abs(age) > TOLERANCE_SECONDS) return false;
+
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        'raw',
+        enc.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const mac = new Uint8Array(
+        await crypto.subtle.sign('HMAC', key, enc.encode(`${timestamp}.${rawBody}`))
+    );
+    const expected = Array.from(mac)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+    return timingSafeEqualHex(expected, given);
+};
+
 export type CheckoutResult = { url?: string; message?: string };
 export type WebhookResult = { orgId: number; plan: string; status: 'active' | 'past_due' | 'canceled' } | null;
 
@@ -80,12 +134,12 @@ class StripeBilling implements BillingProvider {
         return { url: session.url };
     }
 
-    async handleWebhook(rawBody: string, _signature: string | null): Promise<WebhookResult> {
-        // A production adapter verifies the signature against webhookSecret with
-        // Web Crypto here before trusting the body. The event carries the orgId
-        // and plan in metadata; a checkout.session.completed activates the plan,
-        // a subscription deletion cancels it.
-        void this.webhookSecret;
+    async handleWebhook(rawBody: string, signature: string | null): Promise<WebhookResult> {
+        // The webhook route has no user auth, so the signature IS the auth. A
+        // forged body that skipped this check could upgrade any org to any plan
+        // for free, so an unverifiable event is dropped, full stop.
+        if (!(await verifyStripeSignature(rawBody, signature, this.webhookSecret))) return null;
+
         let event: any;
         try {
             event = JSON.parse(rawBody);

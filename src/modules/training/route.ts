@@ -146,12 +146,18 @@ app.get('/models/:id/download', async (c) => {
     });
 });
 
-/** List this org's training jobs. */
+/** List this org's training jobs, optionally narrowed to one project. Training
+ *  is project-based in the UI, so the project screen passes ?projectId. */
 app.get('/jobs', async (c) => {
+    const orgId = c.var.verifiedOrgId;
+    const projectId = Number(c.req.query('projectId'));
+    const where = Number.isInteger(projectId) && projectId > 0
+        ? and(eq(trainingJobs.organizationId, orgId), eq(trainingJobs.projectId, projectId))
+        : eq(trainingJobs.organizationId, orgId);
     const rows = await c.var.db
         .select()
         .from(trainingJobs)
-        .where(eq(trainingJobs.organizationId, c.var.verifiedOrgId))
+        .where(where)
         .orderBy(desc(trainingJobs.createdAt))
         .all();
     return c.json({ data: rows });

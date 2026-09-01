@@ -1,0 +1,38 @@
+[
+  {
+    "id": "yolo11n-seg",
+    "name": "YOLO11n-seg",
+    "family": "YOLO11",
+    "task": "segment",
+    "params": "2.9M",
+    "note": "Smallest and fastest. Good for a first run or limited GPU.",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.pt"
+  },
+  {
+    "id": "yolo11s-seg",
+    "name": "YOLO11s-seg",
+    "family": "YOLO11",
+    "task": "segment",
+    "params": "10M",
+    "note": "A step up in accuracy at a modest cost.",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s-seg.pt"
+  },
+  {
+    "id": "yolov8n-seg",
+    "name": "YOLOv8n-seg",
+    "family": "YOLOv8",
+    "task": "segment",
+    "params": "3.4M",
+    "note": "The widely used v8 baseline. Broad tooling support.",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n-seg.pt"
+  },
+  {
+    "id": "yolov8s-seg",
+    "name": "YOLOv8s-seg",
+    "family": "YOLOv8",
+    "task": "segment",
+    "params": "11.8M",
+    "note": "More capacity for busier scenes.",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s-seg.pt"
+  }
+]

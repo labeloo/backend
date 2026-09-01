@@ -1,88 +1,94 @@
 import { Hono } from 'hono';
 import type { Variables } from '../../types';
 import { saveFile, createTask } from './service';
+import { resolveInsideRoot } from '../../utils';
+import {
+    extractFrames,
+    FfmpegMissingError,
+    VIDEO_EXTENSIONS,
+} from './video';
 import fs from 'fs';
 import { jwt } from 'hono/jwt';
+import { JWT_SECRET, JWT_ALG } from '../../config';
+import { verifyTicket, ticketAllowsProject, type TicketPayload } from '../../accessTicket';
 import path from 'path';
 import unzipper from 'unzipper';
 
 const app = new Hono<{ Variables: Variables }>();
 
+/**
+ * These two GET routes are mounted BEFORE the JWT middleware, because a browser
+ * sends no Authorization header with an `<img src>` and the app's cookie belongs
+ * to the frontend's origin, not the API's. Until this guard existed they were
+ * therefore open to the whole internet: every uploaded image and every extracted
+ * video frame was readable by anyone who knew a path.
+ *
+ * The ticket in the query string is the credential an `<img>` can carry.
+ */
+const readTicket = async (c: any): Promise<TicketPayload | null> =>
+    verifyTicket(JWT_SECRET, c.req.query('t'), Math.floor(Date.now() / 1000));
+
 // Get image upload from the server
-app.get('/public/:uuid', (c) => {
+app.get('/public/:uuid', async (c) => {
     try {
+        if (!(await readTicket(c))) return c.json({ error: 'Unauthorized' }, 401);
+
         const uuid = c.req.param('uuid');
         if (!uuid) throw new Error('UUID is required');
-        const filePath = `./bucket/public/${uuid}.png`;
-        if (!filePath) throw new Error('Profile picture not found');
-        const fileExists = fs.existsSync(filePath);
-        if (!fileExists) throw new Error('Profile picture not found');
 
-        const fileBuffer = fs.readFileSync(filePath);
-        if (!fileBuffer) throw new Error('Failed to read profile picture file');
+        const bytes = await c.get('storage').get(`public/${uuid}.png`);
+        if (!bytes) throw new Error('Profile picture not found');
 
-        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
-            'Content-Type': 'image/jpeg', // Adjust based on your file type
+        return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 200, {
+            'Content-Type': 'image/png',
         });
     } catch (error) {
         console.error('Error in get profile picture route:', error);
-        return c.json(
-            { error: 'Failed to retrieve profile picture', details: error.message },
-            500
-        );
+        return c.json({ error: 'Failed to retrieve profile picture' }, 404);
     }
 });
 
-
-
 // Get project files (now supports both UUID and original filename lookup)
-app.get('/taskData/:projectId/:fileName', (c) => {
+app.get('/taskData/:projectId/:fileName', async (c) => {
     try {
         const projectId = c.req.param('projectId');
         const fileName = c.req.param('fileName');
-
         if (!projectId || !fileName) throw new Error('Project ID and file name are required');
-        
-        const filePath = `./bucket/projects/${projectId}/${fileName}`;
-        
-        if (!fs.existsSync(filePath)) {
-            throw new Error('File not found');
+
+        // Identity alone is not enough: the ticket also names the projects its
+        // holder may read, so one member cannot walk another team's frames.
+        const ticket = await readTicket(c);
+        if (!ticket || !ticketAllowsProject(ticket, Number(projectId))) {
+            return c.json({ error: 'Unauthorized' }, 401);
         }
 
-        const fileBuffer = fs.readFileSync(filePath);
-        const fileExt = path.extname(fileName).toLowerCase();
-        
-        let contentType = 'application/octet-stream';
-        if (['.jpg', '.jpeg'].includes(fileExt)) {
-            contentType = 'image/jpeg';
-        } else if (fileExt === '.png') {
-            contentType = 'image/png';
-        } else if (fileExt === '.gif') {
-            contentType = 'image/gif';
-        } else if (fileExt === '.webp') {
-            contentType = 'image/webp';
-        } else if (fileExt === '.bmp') {
-            contentType = 'image/bmp';
-        }
+        const bytes = await c.get('storage').get(`projects/${projectId}/${fileName}`);
+        if (!bytes) throw new Error('File not found');
 
-        return c.body(fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength), 200, {
+        const ext = path.extname(fileName).toLowerCase();
+        const contentType =
+            ext === '.png' ? 'image/png' :
+            ext === '.gif' ? 'image/gif' :
+            ext === '.webp' ? 'image/webp' :
+            ['.jpg', '.jpeg'].includes(ext) ? 'image/jpeg' :
+            'application/octet-stream';
+
+        return c.body(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, 200, {
             'Content-Type': contentType,
+            // Frames never change once extracted, so let the browser keep them.
+            'Cache-Control': 'public, max-age=31536000, immutable',
         });
     } catch (error) {
         console.error('Error in get project file route:', error);
-        return c.json(
-            { error: 'Failed to retrieve project file', details: error.message },
-            500
-        );
+        return c.json({ error: 'Failed to retrieve file' }, 404);
     }
 });
-
-
 
 app.use(
     '*',
     jwt({
-        secret: 'honoiscool',
+        secret: JWT_SECRET,
+        alg: JWT_ALG,
     })
 );
 
@@ -314,5 +320,133 @@ app.post('/uploadData', async (c) => {
     }
 });
 
+
+/**
+ * Upload videos and turn them into annotation tasks, one per extracted frame.
+ *
+ * The UI lets the annotator pick a frame rate (1-60 fps) and reports back how
+ * many frames were produced, so the response must carry `createdTasks` as a count.
+ * Each frame records the second it came from, which is what lets the timeline
+ * line frames up against the source video.
+ *
+ * Headers: `projectId`, `fps`.  Body: multipart with one or more `files`.
+ */
+app.post('/uploadDataVideo', async (c) => {
+    try {
+        const db = c.var.db;
+        const projectId = c.req.header('projectId');
+        if (!projectId) throw new Error('Project ID is required');
+        if (!/^\d+$/.test(projectId)) throw new Error('Project ID must be numeric');
+
+        const fps = Number(c.req.header('fps') ?? 5);
+        if (!Number.isFinite(fps) || fps <= 0 || fps > 60) {
+            return c.json({ error: 'fps must be a number between 1 and 60' }, 400);
+        }
+
+        const formData = await c.req.formData();
+        const files = formData.getAll('files');
+        if (!files || files.length === 0) {
+            throw new Error('At least one file is required');
+        }
+
+        const projectDir = resolveInsideRoot('./bucket/projects', projectId);
+        if (!projectDir) throw new Error('Invalid project ID');
+        const rawDir = path.join(projectDir, 'raw');
+        fs.mkdirSync(rawDir, { recursive: true });
+
+        const uploadedFiles: any[] = [];
+        const createdTasks: any[] = [];
+
+        for (const file of files) {
+            if (!(file instanceof File)) continue;
+
+            const originalFileName = file.name || 'unknown';
+            const fileExt = path.extname(originalFileName).toLowerCase();
+
+            if (!VIDEO_EXTENSIONS.includes(fileExt)) {
+                uploadedFiles.push({
+                    type: 'skipped',
+                    fileName: originalFileName,
+                    message: `File skipped - supported video formats are ${VIDEO_EXTENSIONS.join(', ')}`,
+                });
+                continue;
+            }
+
+            const uuid = crypto.randomUUID();
+            const videoPath = path.join(rawDir, `${uuid}${fileExt}`);
+            await saveFile(await file.arrayBuffer(), videoPath);
+
+            let frames;
+            try {
+                frames = await extractFrames(videoPath, projectDir, uuid, fps);
+            } catch (extractError: any) {
+                if (extractError instanceof FfmpegMissingError) throw extractError;
+                console.error('Error extracting frames:', extractError);
+                uploadedFiles.push({
+                    type: 'video',
+                    uuid,
+                    fileName: `${uuid}${fileExt}`,
+                    originalFileName,
+                    path: videoPath,
+                    message: 'Video saved but frame extraction failed.',
+                    error: extractError.message,
+                });
+                continue;
+            }
+
+            const frameEntries = [];
+            for (const frame of frames) {
+                const frameUrl = `/api/bucket/taskData/${projectId}/${frame.fileName}`;
+                const taskResult = await createTask(db, parseInt(projectId), frameUrl, 'image', {
+                    originalFileName,
+                    // The annotator sees this in the task card ("From: ..."), so it
+                    // must be the name they uploaded, not the stored UUID.
+                    extractedFrom: originalFileName,
+                    storedFileName: `${uuid}${fileExt}`,
+                    mimeType: 'image/jpeg',
+                    uuid,
+                    frameIndex: frame.frameIndex,
+                    timestampSeconds: frame.timestampSeconds,
+                    fps,
+                });
+                if (taskResult.success && taskResult.data) {
+                    createdTasks.push(taskResult.data);
+                }
+                frameEntries.push({
+                    fileName: frame.fileName,
+                    url: frameUrl,
+                    frameIndex: frame.frameIndex,
+                    timestampSeconds: frame.timestampSeconds,
+                    taskId: taskResult.success && taskResult.data ? taskResult.data.id : null,
+                });
+            }
+
+            uploadedFiles.push({
+                type: 'video',
+                uuid,
+                fileName: `${uuid}${fileExt}`,
+                originalFileName,
+                path: videoPath,
+                fps,
+                frameCount: frames.length,
+                message: `${frames.length} frame(s) extracted at ${fps} FPS.`,
+                frames: frameEntries,
+            });
+        }
+
+        return c.json({
+            message: 'Video upload completed',
+            projectId,
+            fps,
+            uploadedFiles,
+            createdTasks: createdTasks.length,
+            projectDir,
+        });
+    } catch (error) {
+        console.error('Error in upload video route:', error);
+        const status = error instanceof FfmpegMissingError ? 501 : 500;
+        return c.json({ error: 'Failed to upload videos', details: error.message }, status);
+    }
+});
 
 export default app;

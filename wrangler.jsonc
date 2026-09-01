@@ -1,0 +1,30 @@
+{
+  // Labeloo's API on Cloudflare Workers.
+  //
+  // Same source as the Docker image: src/app.ts builds the Hono app, and the two
+  // entry points differ only in where the database and the file store come from.
+  // Node: libsql on disk + ./bucket. Workers: D1 + R2.
+  "name": "labeloo-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "labeloo-db", "database_id": "f35bd281-9e65-4471-ba41-d8166f15d517" }
+  ],
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "labeloo-bucket" }
+  ],
+  "vars": {
+    // The deployed frontend's origin. Self-hosted installs set CORS_ORIGINS in .env.
+    "CORS_ORIGINS": "https://app.labeloo.app,https://labeloo.ahmetcanisik5458675.workers.dev",
+    // This deployment IS the hosted service, so it runs the cloud edition:
+    // plans and quotas apply. A self-hoster leaves EDITION unset (community).
+    "EDITION": "cloud"
+  },
+  "alias": {
+    // unzipper lazily requires the S3 client for a code path this deployment
+    // never takes; the bundler still has to resolve the name.
+    "@aws-sdk/client-s3": "./src/shims/empty.ts"
+  },
+  "observability": { "enabled": true }
+}

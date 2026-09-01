@@ -6,5 +6,6 @@ export type UserLogin = {
 export type payloadType = {
     userId: number;
     email: string;
+    isPlatformAdmin?: boolean;
     exp: number;
 };

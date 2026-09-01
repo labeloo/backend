@@ -13,5 +13,10 @@
         "id": "sam3",
         "name": "Sam3",
         "isActive": true
+    },
+    {
+        "id": "trainer",
+        "name": "Trainer",
+        "isActive": true
     }
 ]

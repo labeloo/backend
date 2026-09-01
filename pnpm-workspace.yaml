@@ -1,0 +1,13 @@
+# pnpm 10+ reads these here rather than from package.json / .npmrc.
+
+overrides:
+  # drizzle-kit depends on tsx with a floating ^4 range, so a fresh resolution
+  # picks up whatever was published today - which pnpm's supply-chain policy
+  # (minimumReleaseAge) then rejects, making the build fail based on the date.
+  # Pinning keeps `pnpm install` reproducible everywhere, including in Docker.
+  tsx: 4.23.12
+
+allowBuilds:
+  esbuild: true          # fetches its platform binary (pulled in by drizzle-kit)
+  sharp: false           # ships prebuilt binaries via optionalDependencies
+  better-sqlite3: false  # not imported anywhere; nothing to build

@@ -17,6 +17,19 @@ export const getBackendTypes = async () => {
 };
 
 // Get all backend relations for an organization
+/**
+ * The stored credential never leaves the server.
+ *
+ * `.select()` returns every column, so the api_key for an organization's model
+ * service was serialised into every list response and read by the browser - any
+ * member could lift it out of devtools. Callers need to know whether a key is
+ * configured, not what it is; replacing one is a write, not a read.
+ */
+const withoutSecret = <T extends { apiKey?: string | null }>(relation: T) => {
+    const { apiKey, ...rest } = relation;
+    return { ...rest, hasApiKey: Boolean(apiKey) };
+};
+
 export const getBackendRelations = async (
     db: LibSQLDatabase,
     organizationId: number
@@ -32,7 +45,7 @@ export const getBackendRelations = async (
         const result = relations.map((relation) => {
             const type = backendTypes.find((t) => t.id === relation.backendId);
             return {
-                ...relation,
+                ...withoutSecret(relation),
                 backendTypeName: type ? type.name : 'Unknown',
             };
         });
@@ -74,7 +87,7 @@ export const getBackendRelationById = async (
 
         const type = backendTypes.find((t) => t.id === relation.backendId);
         const result = {
-            ...relation,
+            ...withoutSecret(relation),
             backendTypeName: type ? type.name : 'Unknown',
         };
 

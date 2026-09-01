@@ -1,3 +1,27 @@
+import path from 'path';
+
+/**
+ * Resolve a path inside `root`, refusing anything that escapes it.
+ *
+ * The bucket routes build file paths straight from URL parameters. Hono decodes
+ * percent-escapes before the handler sees them, so a `fileName` of `..%2f..%2f..%2f..%2fetc%2fpasswd`
+ * arrives as a real traversal sequence - which read any file on the host,
+ * unauthenticated, including the SQLite database with every password hash.
+ *
+ * Returns null when the request tries to leave the root.
+ */
+export const resolveInsideRoot = (root: string, ...segments: string[]): string | null => {
+    const absoluteRoot = path.resolve(root);
+    const candidate = path.resolve(absoluteRoot, ...segments);
+    // path.resolve normalises `..`, so a candidate that still starts with the root
+    // (plus a separator, to reject sibling directories like `/app/bucket-evil`)
+    // is genuinely contained.
+    if (candidate !== absoluteRoot && !candidate.startsWith(absoluteRoot + path.sep)) {
+        return null;
+    }
+    return candidate;
+};
+
 import type { LibSQLDatabase } from 'drizzle-orm/libsql/driver-core';
 import {
     organizationRelations,

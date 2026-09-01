@@ -14,11 +14,12 @@ import { config } from 'dotenv';
 config();
 
 (async () => {
-    if (!fs.existsSync('database.db')) {
-        fs.writeFileSync('database.db', '');
+    const dbFile = (process.env.DATABASE_URL || 'file:database.db').replace(/^file:/, '');
+    if (!fs.existsSync(dbFile)) {
+        fs.writeFileSync(dbFile, '');
     }
 
-    const db = drizzle('file:database.db');
+    const db = drizzle(`file:${dbFile}`);
 
     const result = await db.run('select 1');
     const health = result.rows[0][0] === 1;
@@ -38,6 +39,9 @@ config();
         email,
         password: hashedPassword,
         isActiveUser: true,
+        // The seeded admin operates the whole deployment, so it is the platform
+        // admin. On a self-hosted install this is the only such account.
+        isPlatformAdmin: true,
     });
     console.log(`User ${email} created with password ${password}`);
 

@@ -13,7 +13,7 @@ auth.post('/login', async (c) => {
 
         if (!result.success) throw new Error(result.error);
 
-        return c.json({ token: result.data });
+        return c.json({ token: result.data, isPlatformAdmin: result.isPlatformAdmin ?? false });
     } catch (error) {
         console.error('Login route error:', error);
         return c.json(

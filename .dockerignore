@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.env
+data
+bucket
+database.db
+database.db-*
+*.md
+postman_collection.json

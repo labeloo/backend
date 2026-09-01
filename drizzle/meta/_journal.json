@@ -15,6 +15,34 @@
       "when": 1766154625279,
       "tag": "0001_soft_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1767225600000,
+      "tag": "0002_fix_backend_relations_backend_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788272282473,
+      "tag": "0003_usage_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788272811903,
+      "tag": "0004_training",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788274015847,
+      "tag": "0005_saas",
+      "breakpoints": true
     }
   ]
 }

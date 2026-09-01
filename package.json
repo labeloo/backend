@@ -2,37 +2,42 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "ts-node-dev src/index.ts",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc --outDir dist",
+    "start": "node dist/src/index.js",
+    "seed": "ts-node script.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.9.0",
+  "packageManager": "pnpm@11.5.2",
   "dependencies": {
     "@hono/node-server": "^1.12.0",
     "@libsql/client": "^0.15.5",
     "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^3.0.2",
-    "better-sqlite3": "^11.10.0",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.43.1",
-    "hono": "^4.6.0",
+    "hono": "^4.13.5",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
-    "sharp": "^0.34.5",
     "ts-node-dev": "^2.0.0",
     "unzipper": "^0.12.3",
     "zod": "^3.24.4"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@cloudflare/workers-types": "^5.20260830.1",
+    "@types/node": "^26.4.0",
     "@types/unzipper": "^0.10.11",
     "drizzle-kit": "^0.31.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }

@@ -1,0 +1,38 @@
+[
+  {
+    "key": "free",
+    "name": "Free",
+    "priceMonthly": 0,
+    "features": ["assist"],
+    "limits": {
+      "assist.callsPerDay": 200,
+      "training.gpuSecondsPerMonth": 0,
+      "training.concurrentJobs": 0,
+      "seats": 1
+    }
+  },
+  {
+    "key": "starter",
+    "name": "Starter",
+    "priceMonthly": 49,
+    "features": ["assist", "training"],
+    "limits": {
+      "assist.callsPerDay": 2000,
+      "training.gpuSecondsPerMonth": 1800,
+      "training.concurrentJobs": 1,
+      "seats": 5
+    }
+  },
+  {
+    "key": "pro",
+    "name": "Pro",
+    "priceMonthly": 199,
+    "features": ["assist", "training"],
+    "limits": {
+      "assist.callsPerDay": 20000,
+      "training.gpuSecondsPerMonth": 36000,
+      "training.concurrentJobs": 3,
+      "seats": 20
+    }
+  }
+]
